@@ -1,0 +1,60 @@
+Fast Dev Container Commands
+==================================
+
+COMMANDS:
+  dev_start [index|name] [-p PORTS] [-i IMAGE|DOCKERFILE] [-c CMD]
+    Start or create a container
+    - No arg: use current directory
+    - Number: use container at index (from dev_list)
+    - Name: use named container
+    Flags:
+      -p ports (space-separated)
+      -i image name OR Dockerfile path (auto-builds)
+      -c docker_cmd
+
+  dev_stop [index|name] [-c CMD]
+    Stop a container
+    Flags: -c docker_cmd
+
+  dev_new [-p PORTS] [-i IMAGE|DOCKERFILE] [-c CMD]
+    Create new timestamped container (auto-saves config if flags provided)
+
+  dev_rm [index|name] [-f] [--with-config] [-c CMD]
+    Remove a container (preserves config by default)
+    - No arg: use current directory
+    - Number: use container at index (from dev_list)
+    - Name: use named container
+    Flags:
+      -f: force remove without stopping
+      --with-config: also remove config entry
+      -c docker_cmd
+
+  dev_list
+    List all dev containers with config
+    ● running | ○ stopped | ◌ saved
+
+  dev_help
+    Show this help
+
+EXAMPLES:
+  # Start with flags (auto-saves to config)
+  dev_start -p "8080:80 3000" -i node:latest
+  
+  # Start with Dockerfile (auto-saves, ports auto-normalize)
+  dev_start -i ./Dockerfile -p "8080 3000"
+  
+  # List and manage by index
+  dev_list
+  dev_start 2
+  dev_stop 2
+  dev_rm 2
+  
+  # Remove with force (or current directory)
+  dev_rm -f
+  dev_rm 1 -f
+  
+  # Edit config directly
+  nano .dev_config.json
+
+CONFIG FILE: .dev_config.json (auto-saved, edit directly)
+DOCKERFILE: Dockerfile included as full-stack template
