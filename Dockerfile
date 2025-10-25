@@ -60,5 +60,8 @@ RUN apt-get update && apt-get install -y apt-transport-https \
 # Set working directory
 WORKDIR /workspace
 
+# Unset DEBIAN_FRONTEND
+RUN unset DEBIAN_FRONTEND
+
 # Keep container running
 CMD ["tail", "-f", "/dev/null"]

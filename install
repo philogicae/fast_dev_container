@@ -276,42 +276,37 @@ install_fdevc() {
         log_success "Added to ${shell_config}"
     fi
     
-    echo ""
-    
-    # Step 4: Load into current shell
+    echo
+
+    # Step 4: Load commands when possible
     if [[ -t 0 ]]; then
-        log_step "Loading fdevc in current shell..."
+        log_step "Loading fdevc for this session..."
         # shellcheck disable=SC1090
         if source "${INSTALL_DIR}/fdevc.sh" 2>/dev/null; then
-            log_success "Loaded fdevc commands"
-            log_detail "Run: fdevc -h"
+            log_success "fdevc command is ready"
         else
-            log_warning "Could not preload fdevc"
-            log_detail "Open a new shell or 'source ${shell_config}' later"
+            log_warning "Could not auto-load fdevc"
+            log_detail "Run: source ${INSTALL_DIR}/fdevc.sh"
         fi
     fi
 
-    echo ""
     echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo -e "${BOLD}${GREEN}${ICON_SPARKLES}  Installation Complete! ${ICON_SPARKLES}${RESET}"
     echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo ""
 
     echo -e "${BOLD}${CYAN}${ICON_ROCKET} Quick Start:${RESET}"
-    echo ""
     echo -e "  ${BOLD}fdevc${RESET}              ${DIM}# Start/attach to container${RESET}"
     echo -e "  ${BOLD}fdevc new${RESET}          ${DIM}# Create new timestamped container${RESET}"
     echo -e "  ${BOLD}fdevc ls${RESET}           ${DIM}# List all containers${RESET}"
     echo -e "  ${BOLD}fdevc custom${RESET}       ${DIM}# Copy template Dockerfile${RESET}"
     echo -e "  ${BOLD}fdevc -h${RESET}           ${DIM}# Show full help${RESET}"
-    echo ""
 
-    echo -e "${DIM}If commands aren't available in new shells, run:${RESET}"
+    echo -e "${DIM}If commands are missing, run:${RESET}"
     echo -e "  ${BOLD}${GREEN}source ${shell_config}${RESET}"
-    echo ""
+    echo -e "${DIM}Or load directly with:${RESET}"
+    echo -e "  ${BOLD}${GREEN}source ${INSTALL_DIR}/fdevc.sh${RESET}"
 
     echo -e "${DIM}Documentation: ${BLUE}https://github.com/${GITHUB_REPO}${RESET}"
-    echo ""
 }
 
 # Run installation

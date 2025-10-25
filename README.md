@@ -10,6 +10,10 @@ Lightweight helpers for repeatable dev environments.
 
 Create or attach a container for the current directory, then shut it down automatically when you exit.
 
+[![Python](https://img.shields.io/badge/python-3%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/philogicae/fast_dev_container)
+
 ## Installation
 
 **Quick Install (Recommended):**
@@ -107,3 +111,15 @@ export FDEVC_DOCKER="podman" # Docker, Podman, containerd
 export FDEVC_IMAGE="/path/to/Dockerfile" # Path to a Dockerfile
 export FDEVC_IMAGE="debian:13-slim" # Docker image
 ```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a history of changes to this project.
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
