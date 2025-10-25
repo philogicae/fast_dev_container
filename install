@@ -1,0 +1,295 @@
+#!/bin/bash
+
+set -e
+
+GITHUB_REPO="philogicae/fast_dev_container"
+INSTALL_DIR="${HOME}/.fdevc"
+REPO_URL="https://github.com/${GITHUB_REPO}.git"
+
+# Colors and styling
+RESET="\033[0m"
+BOLD="\033[1m"
+DIM="\033[2m"
+BLUE="\033[94m"
+CYAN="\033[96m"
+GREEN="\033[92m"
+YELLOW="\033[93m"
+RED="\033[91m"
+MAGENTA="\033[95m"
+
+# Icons
+ICON_ARROW="→"
+ICON_CHECK="✓"
+ICON_CROSS="✗"
+ICON_STAR="★"
+ICON_ROCKET="🚀"
+ICON_PACKAGE="📦"
+ICON_WRENCH="🔧"
+ICON_SPARKLES="✨"
+
+log_step() {
+    echo -e "${BOLD}${CYAN}${ICON_ARROW} $1${RESET}"
+}
+
+log_success() {
+    echo -e "${BOLD}${GREEN}${ICON_CHECK} $1${RESET}"
+}
+
+log_error() {
+    echo -e "${BOLD}${RED}${ICON_CROSS} $1${RESET}" >&2
+}
+
+log_warning() {
+    echo -e "${BOLD}${YELLOW}⚠ $1${RESET}"
+}
+
+log_detail() {
+    echo -e "  ${DIM}$1${RESET}"
+}
+
+log_highlight() {
+    echo -e "${BOLD}${BLUE}$1${RESET}"
+}
+
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+print_banner() {
+    echo -e "${BOLD}${CYAN}"
+    cat << 'EOF'
+    ______           __     ____               ______            __        _                
+   / ____/___ ______/ /_   / __ \___  _   __  / ____/___  ____  / /_____ _(_)___  ___  _____
+  / /_  / __ `/ ___/ __/  / / / / _ \| | / / / /   / __ \/ __ \/ __/ __ `/ / __ \/ _ \/ ___/
+ / __/ / /_/ (__  ) /_   / /_/ /  __/ |/ / / /___/ /_/ / / / / /_/ /_/ / / / / /  __/ /    
+/_/    \__,_/____/\__/  /_____/\___/|___/  \____/\____/_/ /_/\__/\__,_/_/_/ /_/\___/_/     
+EOF
+    echo -e "${RESET}"
+    echo -e "${BOLD}${MAGENTA}                    Lightweight Container Dev Environments${RESET}"
+    echo ""
+}
+
+check_dependency() {
+    local cmd="$1"
+    local name="$2"
+    local version_flag="${3:---version}"
+    
+    if command_exists "$cmd"; then
+        local version=$(${cmd} ${version_flag} 2>&1 | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1 || echo "unknown")
+        log_success "${name} found ${DIM}(v${version})${RESET}"
+        return 0
+    else
+        log_error "${name} not found"
+        return 1
+    fi
+}
+
+check_dependencies() {
+    log_step "Checking dependencies..."
+    echo ""
+    
+    local all_ok=true
+    
+    if ! check_dependency git "Git"; then
+        all_ok=false
+        log_detail "Install: https://git-scm.com/install"
+    fi
+    
+    if ! check_dependency python3 "Python 3" "--version"; then
+        all_ok=false
+        log_detail "Install: https://python.org/downloads"
+    fi
+    
+    # Check for container runtime
+    if command_exists docker; then
+        check_dependency docker "Docker" "--version"
+    elif command_exists podman; then
+        check_dependency podman "Podman" "--version"
+    else
+        log_error "Docker or Podman not found"
+        log_detail "Install Docker: https://docs.docker.com/get-docker/"
+        log_detail "Or Podman: https://podman.io/getting-started/installation"
+        all_ok=false
+    fi
+    
+    echo ""
+    
+    if [[ "${all_ok}" == false ]]; then
+        log_error "Missing required dependencies"
+        log_detail "Please install them before continuing."
+        exit 1
+    fi
+    
+    log_success "All dependencies satisfied"
+}
+
+detect_shell_config() {
+    local shell_config=""
+    local shell_name="unknown"
+    
+    # Check if zsh is the current shell
+    if [[ -n "${ZSH_VERSION}" ]] || [[ "${SHELL}" == *"zsh"* ]]; then
+        shell_name="zsh"
+        if [[ -f "${HOME}/.zshrc" ]]; then
+            shell_config="${HOME}/.zshrc"
+        fi
+    fi
+    
+    # Check for bash
+    if [[ -z "${shell_config}" ]]; then
+        shell_name="bash"
+        if [[ -f "${HOME}/.bashrc" ]]; then
+            shell_config="${HOME}/.bashrc"
+        elif [[ -f "${HOME}/.bash_profile" ]]; then
+            shell_config="${HOME}/.bash_profile"
+        fi
+    fi
+    
+    if [[ -n "${shell_config}" ]]; then
+        log_success "Detected ${shell_name} shell"
+        log_detail "Config: ${shell_config}"
+    else
+        log_warning "Could not detect shell configuration file"
+        log_detail "Expected: ~/.bashrc or ~/.zshrc"
+    fi
+    
+    echo "${shell_config}"
+}
+
+spinner() {
+    local pid=$1
+    local delay=0.1
+    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    while ps -p "$pid" > /dev/null 2>&1; do
+        local temp=${spinstr#?}
+        printf " [%c]  " "$spinstr"
+        spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        printf "\b\b\b\b\b\b"
+    done
+    printf "    \b\b\b\b"
+}
+
+install_fdevc() {
+    print_banner
+    
+    # Step 1: Check dependencies
+    check_dependencies
+    echo ""
+    
+    # Step 2: Install or update
+    log_step "Installing Fast Dev Container..."
+    echo ""
+    
+    if [[ -d "${INSTALL_DIR}" ]]; then
+        log_highlight "${ICON_PACKAGE} Existing installation detected"
+        log_detail "Location: ${INSTALL_DIR}"
+        echo ""
+        log_step "Updating to latest version..."
+        
+        cd "${INSTALL_DIR}"
+        if git pull origin main --quiet 2>&1; then
+            local latest_commit=$(git log -1 --pretty=format:'%h - %s' 2>/dev/null || echo "unknown")
+            log_success "Repository updated"
+            log_detail "Latest: ${latest_commit}"
+        else
+            log_error "Failed to update repository"
+            log_warning "Try removing ${INSTALL_DIR} and reinstalling"
+            log_detail "Command: rm -rf ${INSTALL_DIR}"
+            exit 1
+        fi
+    else
+        log_highlight "${ICON_PACKAGE} Installing to ${INSTALL_DIR}"
+        echo ""
+        
+        if git clone --quiet "${REPO_URL}" "${INSTALL_DIR}" 2>&1; then
+            log_success "Repository cloned successfully"
+            local file_count=$(find "${INSTALL_DIR}" -type f | wc -l)
+            log_detail "Files installed: ${file_count}"
+        else
+            log_error "Failed to clone repository"
+            log_detail "Repository: ${REPO_URL}"
+            exit 1
+        fi
+    fi
+    
+    echo ""
+    
+    # Step 3: Configure shell
+    log_step "Configuring shell integration..."
+    echo ""
+    
+    local shell_config=$(detect_shell_config)
+    
+    if [[ -z "${shell_config}" ]]; then
+        echo ""
+        log_warning "Manual setup required"
+        echo ""
+        log_detail "Add this line to your shell config (.bashrc or .zshrc):"
+        echo ""
+        echo -e "    ${BOLD}${GREEN}source ${INSTALL_DIR}/fdevc.sh${RESET}"
+        echo ""
+        exit 0
+    fi
+    
+    echo ""
+    
+    # Check if already sourced
+    local source_line="source ${INSTALL_DIR}/fdevc.sh"
+    if grep -q "source.*fdevc.sh" "${shell_config}" 2>/dev/null; then
+        log_highlight "${ICON_CHECK} Already configured in shell"
+        log_detail "Source line exists in ${shell_config}"
+    else
+        log_step "Adding to shell configuration..."
+        {
+            echo ""
+            echo "# Fast Dev Container"
+            echo "${source_line}"
+        } >> "${shell_config}"
+        log_success "Added to ${shell_config}"
+    fi
+    
+    echo ""
+    
+    # Step 4: Load into current shell
+    if [[ -t 0 ]]; then
+        log_step "Loading into current shell..."
+        # shellcheck disable=SC1090
+        if source "${INSTALL_DIR}/fdevc.sh" 2>/dev/null; then
+            log_success "Loaded successfully"
+            log_detail "fdevc is ready to use!"
+        else
+            log_warning "Could not load in current shell"
+            log_detail "This is normal when piped from curl"
+        fi
+    fi
+    
+    echo ""
+    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${BOLD}${GREEN}${ICON_SPARKLES}  Installation Complete! ${ICON_SPARKLES}${RESET}"
+    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    
+    echo -e "${BOLD}${CYAN}${ICON_ROCKET} Quick Start:${RESET}"
+    echo ""
+    echo -e "  ${BOLD}fdevc${RESET}              ${DIM}# Start/attach to container${RESET}"
+    echo -e "  ${BOLD}fdevc new${RESET}          ${DIM}# Create new timestamped container${RESET}"
+    echo -e "  ${BOLD}fdevc ls${RESET}           ${DIM}# List all containers${RESET}"
+    echo -e "  ${BOLD}fdevc custom${RESET}       ${DIM}# Copy template Dockerfile${RESET}"
+    echo -e "  ${BOLD}fdevc -h${RESET}           ${DIM}# Show full help${RESET}"
+    echo ""
+    
+    if [[ ! -t 0 ]]; then
+        echo -e "${BOLD}${YELLOW}${ICON_WRENCH} Next Steps:${RESET}"
+        echo ""
+        echo -e "  ${DIM}Restart your terminal or run:${RESET}"
+        echo -e "  ${BOLD}${GREEN}source ${shell_config}${RESET}"
+        echo ""
+    fi
+    
+    echo -e "${DIM}Documentation: ${BLUE}https://github.com/${GITHUB_REPO}${RESET}"
+    echo ""
+}
+
+# Run installation
+install_fdevc

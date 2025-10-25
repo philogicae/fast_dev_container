@@ -1,60 +1,96 @@
-Fast Dev Container Commands
-==================================
+Fast Dev Container - Lightweight Container Dev Environments
+===========================================================
 
-COMMANDS:
-  dev_start [index|name] [-p PORTS] [-i IMAGE|DOCKERFILE] [-c CMD]
-    Start or create a container
-    - No arg: use current directory
-    - Number: use container at index (from dev_list)
-    - Name: use named container
-    Flags:
-      -p ports (space-separated)
-      -i image name OR Dockerfile path (auto-builds)
-      -c docker_cmd
+COMMANDS
+--------
 
-  dev_stop [index|name] [-c CMD]
-    Stop a container
-    Flags: -c docker_cmd
+fdevc [index|name] [OPTIONS]
+    Attach to or create a project container based on current directory.
+    Container stops automatically on exit unless -d flag is used.
+    Equivalent to: fdevc start [index|name] [OPTIONS]
+    
+    Arguments:
+        index|name    Container index from fdevc ls or explicit container name
+                     (omit to use current directory name)
+    
+    Options:
+        -p PORTS      Port mappings (space-separated, e.g., "8080 3000:3001")
+        -i IMAGE      Docker image name or path to Dockerfile
+        --dkr CMD     Docker-compatible command (docker, podman, etc.)
+        -c CMD        Run command once on attach (not saved)
+        --c-s CMD     Run command on attach and save for future sessions
+        -d            Detach mode - keep container running after exit
+        --tmp         Temporary mode - remove container on exit (overrides -d)
+        --no-v        Skip volume mount (no project directory access)
+        --no-s        Skip Docker socket mount (no nested containers)
 
-  dev_new [-p PORTS] [-i IMAGE|DOCKERFILE] [-c CMD]
-    Create new timestamped container (auto-saves config if flags provided)
+fdevc start [index|name] [OPTIONS]
+    Explicitly attach to or create a project container.
+    Same as calling fdevc without a subcommand.
+    
+    Arguments and Options: Same as fdevc (above)
 
-  dev_rm [index|name] [-f] [--with-config] [-c CMD]
-    Remove a container (preserves config by default)
-    - No arg: use current directory
-    - Number: use container at index (from dev_list)
-    - Name: use named container
-    Flags:
-      -f: force remove without stopping
-      --with-config: also remove config entry
-      -c docker_cmd
+fdevc new [OPTIONS]
+    Create a new timestamped container for current directory.
+    Useful for parallel isolated environments.
+    
+    Options:
+        Same as fdevc start (except no index|name argument)
 
-  dev_list
-    List all dev containers with config
-    ● running | ○ stopped | ◌ saved
+fdevc stop [index|name] [OPTIONS]
+    Stop a running container without removing it.
+    
+    Arguments:
+        index|name    Container index from fdevc ls or explicit container name
+    
+    Options:
+        --dkr CMD     Docker-compatible command (docker, podman, etc.)
 
-  dev_help
-    Show this help
+fdevc rm [index|name] [OPTIONS]
+    Stop and remove a container.
+    
+    Arguments:
+        index|name    Container index from fdevc ls or explicit container name
+    
+    Options:
+        -f, --force   Force remove without stopping gracefully
+        --all         Delete saved configuration too
+        --dkr CMD     Docker-compatible command (docker, podman, etc.)
 
-EXAMPLES:
-  # Start with flags (auto-saves to config)
-  dev_start -p "8080:80 3000" -i node:latest
-  
-  # Start with Dockerfile (auto-saves, ports auto-normalize)
-  dev_start -i ./Dockerfile -p "8080 3000"
-  
-  # List and manage by index
-  dev_list
-  dev_start 2
-  dev_stop 2
-  dev_rm 2
-  
-  # Remove with force (or current directory)
-  dev_rm -f
-  dev_rm 1 -f
-  
-  # Edit config directly
-  nano .dev_config.json
+fdevc ls
+    List all fdevc containers with their status and configuration.
+    
+    Status indicators:
+        ● running   - Container is currently running
+        ○ stopped   - Container exists but is stopped
+        ◌ saved     - Configuration saved but container removed
 
-CONFIG FILE: .dev_config.json (auto-saved, edit directly)
-DOCKERFILE: Dockerfile included as full-stack template
+fdevc custom
+    Copy the template Dockerfile to current directory as fdevc.Dockerfile
+    This local Dockerfile will be used by default for containers in this directory.
+
+fdevc -h, fdevc --help
+    Display this help message.
+
+CONFIGURATION
+-------------
+
+Settings are automatically saved to .dev_config.json in the script directory.
+
+Local Dockerfile:
+    If fdevc.Dockerfile exists in current directory, it will be used by default
+    instead of the global template. Use 'fdevc custom' to create one.
+
+Environment Variables:
+    FDEVC_PYTHON     Python interpreter (default: python3)
+    FDEVC_DOCKER     Container runtime (default: docker)
+    FDEVC_IMAGE      Default image or Dockerfile path
+
+TIPS
+----
+
+• Use --tmp for one-off experiments that should be cleaned up
+• Use -d to keep long-running services active in background
+• Use --c-s to save initialization commands for next session
+• Run 'fdevc ls' to see all your containers and their indices
+• Port format: "8080" maps 8080:8080, "3000:8000" maps host:container

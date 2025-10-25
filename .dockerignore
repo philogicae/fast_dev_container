@@ -8,6 +8,8 @@
 fdevc.sh
 utils.py
 help.txt
+Dockerfile
+fdevc.Dockerfile
 
 # Documentation
 README.md
