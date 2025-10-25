@@ -70,10 +70,16 @@ _docker_exec() {
 }
 _get_container_name() { echo "fdevc.$(basename "$PWD")"; }
 
+_generate_project_label() {
+    ${FDEVC_PYTHON} "${UTILS_PY}" random_label
+}
+
 _prepare_save_config_args() {
     local no_volume="$1" no_socket="$2" project_path="$3" socket_config="$4"
     local project_to_save="${project_path}"
-    [[ "${no_volume}" == true ]] && project_to_save=""
+    if [[ "${no_volume}" == true ]]; then
+        project_to_save=""
+    fi
     local socket_to_save="${socket_config}"
     if [[ "${no_socket}" == true ]]; then
         socket_to_save="false"
@@ -239,8 +245,11 @@ _merge_config() {
 
     local project_from_config="$(_get_config_value "${config}" "project_path" "__DEVCONF_NO_PROJECT__")"
     local project_path=""
-    if [[ -n "${project_override}" ]]; then
+    if [[ -n "${project_override}" && "${project_override}" != "__NO_PROJECT__" ]]; then
         project_path="${project_override}"
+    elif [[ "${project_override}" == "__NO_PROJECT__" ]]; then
+        # Explicitly no project (e.g., VM mode)
+        project_path=""
     elif [[ "${project_from_config}" == "__DEVCONF_NO_PROJECT__" ]]; then
         project_path="$PWD"
     else
@@ -270,7 +279,7 @@ _merge_config() {
 
 _fdevc_start() {
     local container_arg="" ports_override="" image_override="" docker_cmd_override="" detach=false remove_on_exit=false
-    local no_volume=false no_socket=false force_new=false
+    local no_volume=false no_socket=false force_new=false vm_mode=false
     local startup_cmd_once="" startup_cmd_save="" startup_cmd_save_flag=false
 
     while [[ $# -gt 0 ]]; do
@@ -285,8 +294,9 @@ _fdevc_start() {
             -c) startup_cmd_once="$2"; shift 2 ;;
             --c-s) startup_cmd_once="$2"; startup_cmd_save="$2"; startup_cmd_save_flag=true; shift 2 ;;
             --new) force_new=true; shift ;;
+            --vm) vm_mode=true; no_volume=true; no_socket=true; shift ;;
             *) 
-                if [[ "${force_new}" == true ]]; then
+                if [[ "${force_new}" == true ]] || [[ "${vm_mode}" == true ]]; then
                     _msg_error "Unknown argument: $1"
                     return 1
                 fi
@@ -306,20 +316,42 @@ _fdevc_start() {
 
     # Determine container name based on mode
     local container_name
-    if [[ "${force_new}" == true ]]; then
+    local config_target_name
+    if [[ "${vm_mode}" == true ]]; then
+        # VM mode: generate special name fdevc.vm.<random-name>
+        container_name="fdevc.vm.$(_generate_project_label)"
+        config_target_name="${container_name}"
+    elif [[ "${force_new}" == true ]]; then
         container_name="fdevc.$(basename "$PWD").$(date +%s)"
+        config_target_name="${container_name}"
+    elif [[ "${no_volume}" == true && -z "${container_arg}" ]]; then
+        # --no-v mode without specific container: generate random name
+        container_name="fdevc.$(_generate_project_label)"
+        config_target_name="${container_name}"
     else
         container_name="$(_resolve_container_name "${container_arg}")"
         [[ -z "${container_name}" ]] && { _msg_error "No container found at index ${container_arg}. Run 'fdevc ls'."; return 1; }
+        config_target_name="${container_name}"
     fi
-    
+
+    if [[ "${remove_on_exit}" == true ]]; then
+        # Remove .tmp if already present, then add it at the end
+        container_name="${container_name%.tmp}.tmp"
+    fi
+
     local socket_override_arg=""
     [[ "${no_socket}" == true ]] && socket_override_arg="false"
 
-    # Merge config with overrides (force_new uses $PWD as project_path)
+    # Merge config with overrides
     local merge_project_path=""
-    [[ "${force_new}" == true ]] && merge_project_path="$PWD"
-    IFS='|' read -r ports image_config docker_cmd project_path startup_cmd_config socket_config config_present <<< "$(_merge_config "${container_name}" "${ports_override}" "${image_override}" "${docker_cmd_override}" "${merge_project_path}" "${socket_override_arg}")"
+    if [[ "${vm_mode}" == true ]]; then
+        # VM mode: explicitly set no project path (sentinel value)
+        merge_project_path="__NO_PROJECT__"
+    elif [[ "${force_new}" == true ]]; then
+        # New mode: use current directory
+        merge_project_path="$PWD"
+    fi
+    IFS='|' read -r ports image_config docker_cmd project_path startup_cmd_config socket_config config_present <<< "$(_merge_config "${config_target_name}" "${ports_override}" "${image_override}" "${docker_cmd_override}" "${merge_project_path}" "${socket_override_arg}")"
     local startup_cmd_session="${startup_cmd_once:-${startup_cmd_config}}"
     local startup_cmd_to_save="${startup_cmd_config}"
     if [[ "${startup_cmd_save_flag}" == true ]]; then
@@ -351,70 +383,93 @@ _fdevc_start() {
         [[ -n "${ports}" ]] && _msg_detail "Ports: ${ports}"
         _msg_docker_cmd "${docker_cmd} start ${container_name}"
         _docker_exec "${docker_cmd}" start "${container_name}" >/dev/null 2>&1 || { _msg_error "Failed to start"; return 1; }
-        _msg_success "Attaching..."
+
         if [[ "${remove_on_exit}" != true ]]; then
-            IFS='|' read -r project_to_save socket_to_save <<< "$(_prepare_save_config_args "${no_volume}" "${no_socket}" "${project_path}" "${socket_config}")"
-            if [[ "${startup_cmd_save_flag}" == true || "${config_present}" != "true" ]]; then
-                _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${project_to_save}" "${startup_cmd_to_save}" "${socket_to_save}"
+            local effective_project_path="${project_path}"
+            if [[ "${no_volume}" == true ]]; then
+                effective_project_path=""
+            fi
+            IFS='|' read -r project_to_save socket_to_save <<< "$( _prepare_save_config_args "${no_volume}" "${no_socket}" "${effective_project_path}" "${socket_config}" )"
+            local project_path_to_store="${project_to_save}"
+            if [[ "${startup_cmd_save_flag}" == true || "${config_present}" != "true" || "${overrides_supplied}" == true || "${no_socket}" == true || "${no_volume}" == true ]]; then
+                _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${project_path_to_store}" "${startup_cmd_to_save}" "${socket_to_save}"
             fi
         fi
-        if [[ -n "${startup_cmd_session}" ]]; then
-            _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${startup_cmd_session}; exec bash"
+        if [[ "${detach}" == true ]]; then
+            _msg_success "Container '${container_name}' is running in background (detach mode)."
         else
-            _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash
+            _msg_success "Attaching..."
+            if [[ -n "${startup_cmd_session}" ]]; then
+                _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${startup_cmd_session}; exec bash"
+            else
+                _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash
+            fi
+            exec_status=$?
         fi
-        exec_status=$?
     else
         _msg_info "Creating '${container_name}' [${image}]"
         [[ -n "${ports}" ]] && _msg_detail "Ports: ${ports}"
-        
+
         local port_flags_arr=()
         while IFS= read -r line; do port_flags_arr+=("$line"); done < <(_build_port_flags "${ports}")
 
         local run_args=(-d --name "${container_name}")
+        local socket_label="false"
         if [[ "${no_volume}" != true ]]; then
             run_args+=(-v "${project_path}:/workspace")
         fi
         if [[ "${no_socket}" != true ]]; then
             run_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+            socket_label="true"
         fi
+        run_args+=(--label "fdevc.socket=${socket_label}")
         run_args+=("${port_flags_arr[@]}" "${image}")
 
         _msg_docker_cmd "${docker_cmd} run ${run_args[*]}"
         _docker_exec "${docker_cmd}" run "${run_args[@]}" || { _msg_error "Failed to create"; return 1; }
         if [[ "${remove_on_exit}" != true ]]; then
-            IFS='|' read -r project_to_save socket_to_save <<< "$(_prepare_save_config_args "${no_volume}" "${no_socket}" "${project_path}" "${socket_config}")"
-            _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${project_to_save}" "${startup_cmd_to_save}" "${socket_to_save}"
+            local project_to_save socket_to_save
+            local effective_project_path="${project_path}"
+            if [[ "${no_volume}" == true ]]; then
+                effective_project_path=""
+            fi
+            IFS='|' read -r project_to_save socket_to_save <<< "$( _prepare_save_config_args "${no_volume}" "${no_socket}" "${effective_project_path}" "${socket_config}" )"
+            local project_path_to_store="${project_to_save}"
+            _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${project_path_to_store}" "${startup_cmd_to_save}" "${socket_to_save}"
         fi
 
-        _msg_success "Created, attaching..."
-        if [[ -n "${startup_cmd_session}" ]]; then
-            _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${startup_cmd_session}; exec bash"
+        if [[ "${detach}" == true ]]; then
+            _msg_success "Container '${container_name}' created and running in background (detach mode)."
         else
-            _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash
+            _msg_success "Created, attaching..."
+            if [[ -n "${startup_cmd_session}" ]]; then
+                _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${startup_cmd_session}; exec bash"
+            else
+                _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash
+            fi
+            exec_status=$?
         fi
-        exec_status=$?
     fi
 
     if [[ "${detach}" == true ]]; then
-        _msg_info "Detaching '${container_name}'..."
-    else
-        _msg_info "Stopping '${container_name}'..."
-        _msg_docker_cmd "${docker_cmd} stop ${container_name}"
-        if _docker_exec "${docker_cmd}" stop "${container_name}" >/dev/null 2>&1; then
-            _msg_success "Stopped"
-            if [[ "${remove_on_exit}" == true ]]; then
-                _msg_info "Removing '${container_name}'..."
-                _msg_docker_cmd "${docker_cmd} rm -f ${container_name}"
-                if _docker_exec "${docker_cmd}" rm -f "${container_name}" >/dev/null 2>&1; then
-                    _msg_success "Removed"
-                else
-                    _msg_error "Failed to remove '${container_name}'"
-                fi
+        return "${exec_status}"
+    fi
+
+    _msg_info "Stopping '${container_name}'..."
+    _msg_docker_cmd "${docker_cmd} stop ${container_name}"
+    if _docker_exec "${docker_cmd}" stop "${container_name}" >/dev/null 2>&1; then
+        _msg_success "Stopped"
+        if [[ "${remove_on_exit}" == true ]]; then
+            _msg_info "Removing '${container_name}'..."
+            _msg_docker_cmd "${docker_cmd} rm -f ${container_name}"
+            if _docker_exec "${docker_cmd}" rm -f "${container_name}" >/dev/null 2>&1; then
+                _msg_success "Removed"
+            else
+                _msg_error "Failed to remove '${container_name}'"
             fi
-        else
-            _msg_error "Failed to stop '${container_name}'"
         fi
+    else
+        _msg_error "Failed to stop '${container_name}'"
     fi
 
     return "${exec_status}"
@@ -423,6 +478,11 @@ _fdevc_start() {
 _fdevc_new() {
     # Wrapper that creates a new timestamped container
     _fdevc_start --new "$@"
+}
+
+_fdevc_vm() {
+    # Wrapper for VM mode: no volume, no socket, random name
+    _fdevc_start --vm "$@"
 }
 
 _fdevc_stop() {
@@ -533,7 +593,7 @@ _fdevc_help() {
 }
 
 _fdevc_ls() {
-    _docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^fdevc\\." --format '{{.Names}}|||{{.Status}}|||{{.Image}}' 2>/dev/null | \
+    _docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^fdevc\\." --format '{{.Names}}|||{{.Status}}|||{{.Image}}|||{{.Mounts}}|||{{.Label "fdevc.socket"}}' 2>/dev/null | \
     ${FDEVC_PYTHON} "${UTILS_PY}" list_containers "${CONFIG_FILE}"
 }
 
@@ -570,6 +630,10 @@ fdevc() {
         custom)
             shift
             _fdevc_custom "$@"
+            ;;
+        vm)
+            shift
+            _fdevc_vm "$@"
             ;;
         ls)
             shift

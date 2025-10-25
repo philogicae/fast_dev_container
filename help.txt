@@ -37,6 +37,20 @@ fdevc new [OPTIONS]
     Options:
         Same as fdevc start (except no index|name argument)
 
+fdevc vm [OPTIONS]
+    Create a VM-like container with no volume or socket mounts.
+    Shortcut for: fdevc start --no-v --no-s
+    Container name: fdevc.vm.<random-name>
+    
+    Options:
+        -p PORTS      Port mappings (space-separated)
+        -i IMAGE      Docker image name or path to Dockerfile
+        --dkr CMD     Docker-compatible command (docker, podman, etc.)
+        -c CMD        Run command once on attach (not saved)
+        --c-s CMD     Run command on attach and save for future sessions
+        -d            Detach mode - keep container running after exit
+        --tmp         Temporary mode - remove container on exit
+
 fdevc stop [index|name] [OPTIONS]
     Stop a running container without removing it.
     

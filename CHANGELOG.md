@@ -5,3 +5,7 @@
 - Enhance development container with improved tooling and UX
 - Improve shell detection and config file handling
 - Enhance installation and documentation
+
+### 🐛 Bug Fixes
+
+- Streamline Docker environment configuration

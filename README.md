@@ -41,6 +41,9 @@ fdevc start [index|name] [OPTIONS]
 # Create a timestamped container for the current directory.
 fdevc new [OPTIONS]
 
+# Create a VM-like container (no volume/socket mounts).
+fdevc vm [OPTIONS]
+
 # Stop a running container.
 fdevc stop [index|name] [--dkr CMD]
 
@@ -57,7 +60,7 @@ fdevc ls
 fdevc [-h|--help]
 ```
 
-**Options for fdevc (or fdevc start) and fdevc new:**
+**Options for fdevc (or fdevc start), fdevc new, and fdevc vm:**
 - `-p PORTS` - Port mappings (space-separated, e.g., "8080 3000:3001")
 - `-i IMAGE|DOCKERFILE` - Docker image or path to Dockerfile
 - `--dkr CMD` - Use alternative container runtime (e.g., podman)
@@ -68,7 +71,9 @@ fdevc [-h|--help]
 - `--no-v` - Skip volume mount (no project directory access)
 - `--no-s` - Skip Docker socket mount (no nested containers)
 
-**Status indicators:** ● running · ○ stopped · ◌ saved
+**Note:** `fdevc vm` automatically applies `--no-v` and `--no-s`.
+
+**Status indicators:** running ● · stopped ○ · saved ◌
 
 ## Examples
 
@@ -90,6 +95,12 @@ fdevc --c-s "npm run dev"
 
 # Create temporary test environment without volume mount
 fdevc new --tmp --no-v
+
+# Create isolated VM-like container (no volumes or socket)
+fdevc vm
+
+# Create temporary VM with custom image
+fdevc vm --tmp -i debian:13-slim
 
 # Start by index from fdevc ls
 fdevc 1

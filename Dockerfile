@@ -56,11 +56,11 @@ RUN apt-get update && apt-get install -y apt-transport-https \
     && apt-get install -y docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
+# Install fdevc (Fast Dev Container CLI)
+RUN curl -fsSL https://raw.githubusercontent.com/philogicae/fast_dev_container/main/install | bash
+
 # Set working directory
 WORKDIR /workspace
-
-# Unset DEBIAN_FRONTEND
-RUN unset DEBIAN_FRONTEND
 
 # Keep container running
 CMD ["tail", "-f", "/dev/null"]
