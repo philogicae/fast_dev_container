@@ -59,10 +59,10 @@ print_banner() {
     echo -e "${BOLD}${CYAN}"
     cat << 'EOF'
     ______           __     ____               ______            __        _                
-   / ____/___ ______/ /_   / __ \___  _   __  / ____/___  ____  / /_____ _(_)___  ___  _____
-  / /_  / __ `/ ___/ __/  / / / / _ \| | / / / /   / __ \/ __ \/ __/ __ `/ / __ \/ _ \/ ___/
- / __/ / /_/ (__  ) /_   / /_/ /  __/ |/ / / /___/ /_/ / / / / /_/ /_/ / / / / /  __/ /    
-/_/    \__,_/____/\__/  /_____/\___/|___/  \____/\____/_/ /_/\__/\__,_/_/_/ /_/\___/_/     
+   / ____/___ ______/ /_   / __ \___ _   __   / ____/___  ____  / /_____ _(_)___  ___  _____
+  / /_  / __ `/ ___/ __/  / / / / _ \ | / /  / /   / __ \/ __ \/ __/ __ `/ / __ \/ _ \/ ___/
+ / __/ / /_/ (__  ) /_   / /_/ /  __/ |/ /  / /___/ /_/ / / / / /_/ /_/ / / / / /  __/ /    
+/_/    \__,_/____/\__/  /_____/\___/|___/   \____/\____/_/ /_/\__/\__,_/_/_/ /_/\___/_/      
 EOF
     echo -e "${RESET}"
     echo -e "${BOLD}${MAGENTA}                    Lightweight Container Dev Environments${RESET}"
@@ -126,33 +126,36 @@ check_dependencies() {
 detect_shell_config() {
     local shell_config=""
     local shell_name="unknown"
-    
-    # Check if zsh is the current shell
+
+    # Prefer explicit shell variables when available
     if [[ -n "${ZSH_VERSION}" ]] || [[ "${SHELL}" == *"zsh"* ]]; then
         shell_name="zsh"
-        if [[ -f "${HOME}/.zshrc" ]]; then
-            shell_config="${HOME}/.zshrc"
-        fi
-    fi
-    
-    # Check for bash
-    if [[ -z "${shell_config}" ]]; then
+        shell_config="${HOME}/.zshrc"
+    elif [[ -n "${BASH_VERSION}" ]] || [[ "${SHELL}" == *"bash"* ]]; then
         shell_name="bash"
         if [[ -f "${HOME}/.bashrc" ]]; then
             shell_config="${HOME}/.bashrc"
         elif [[ -f "${HOME}/.bash_profile" ]]; then
             shell_config="${HOME}/.bash_profile"
+        else
+            shell_config="${HOME}/.bashrc"
         fi
     fi
-    
-    if [[ -n "${shell_config}" ]]; then
-        log_success "Detected ${shell_name} shell"
-        log_detail "Config: ${shell_config}"
-    else
-        log_warning "Could not detect shell configuration file"
-        log_detail "Expected: ~/.bashrc or ~/.zshrc"
+
+    if [[ -z "${shell_config}" ]]; then
+        log_warning "Could not detect shell configuration file" >&2
+        log_detail "Expected: ~/.bashrc or ~/.zshrc" >&2
+        return
     fi
-    
+
+    if [[ -e "${shell_config}" ]]; then
+        log_success "Detected ${shell_name} shell" >&2
+        log_detail "Config: ${shell_config}" >&2
+    else
+        log_success "Detected ${shell_name} shell" >&2
+        log_detail "Config: ${shell_config} (will be created)" >&2
+    fi
+
     echo "${shell_config}"
 }
 
@@ -231,6 +234,30 @@ install_fdevc() {
         echo ""
         exit 0
     fi
+
+    if [[ ! -e "${shell_config}" ]]; then
+        log_step "Preparing shell configuration..."
+        local shell_config_dir
+        shell_config_dir=$(dirname "${shell_config}")
+
+        if [[ ! -d "${shell_config_dir}" ]]; then
+            if mkdir -p "${shell_config_dir}" 2>/dev/null; then
+                log_detail "Created directory: ${shell_config_dir}"
+            else
+                log_error "Unable to create directory ${shell_config_dir}"
+                log_detail "Create it manually and rerun the installer."
+                exit 1
+            fi
+        fi
+
+        if touch "${shell_config}" 2>/dev/null; then
+            log_success "Created ${shell_config}"
+        else
+            log_error "Unable to create ${shell_config}"
+            log_detail "Add 'source ${INSTALL_DIR}/fdevc.sh' to your shell config manually."
+            exit 1
+        fi
+    fi
     
     echo ""
     
@@ -253,23 +280,23 @@ install_fdevc() {
     
     # Step 4: Load into current shell
     if [[ -t 0 ]]; then
-        log_step "Loading into current shell..."
+        log_step "Loading fdevc in current shell..."
         # shellcheck disable=SC1090
         if source "${INSTALL_DIR}/fdevc.sh" 2>/dev/null; then
-            log_success "Loaded successfully"
-            log_detail "fdevc is ready to use!"
+            log_success "Loaded fdevc commands"
+            log_detail "Run: fdevc -h"
         else
-            log_warning "Could not load in current shell"
-            log_detail "This is normal when piped from curl"
+            log_warning "Could not preload fdevc"
+            log_detail "Open a new shell or 'source ${shell_config}' later"
         fi
     fi
-    
+
     echo ""
     echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo -e "${BOLD}${GREEN}${ICON_SPARKLES}  Installation Complete! ${ICON_SPARKLES}${RESET}"
     echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
-    
+
     echo -e "${BOLD}${CYAN}${ICON_ROCKET} Quick Start:${RESET}"
     echo ""
     echo -e "  ${BOLD}fdevc${RESET}              ${DIM}# Start/attach to container${RESET}"
@@ -278,15 +305,11 @@ install_fdevc() {
     echo -e "  ${BOLD}fdevc custom${RESET}       ${DIM}# Copy template Dockerfile${RESET}"
     echo -e "  ${BOLD}fdevc -h${RESET}           ${DIM}# Show full help${RESET}"
     echo ""
-    
-    if [[ ! -t 0 ]]; then
-        echo -e "${BOLD}${YELLOW}${ICON_WRENCH} Next Steps:${RESET}"
-        echo ""
-        echo -e "  ${DIM}Restart your terminal or run:${RESET}"
-        echo -e "  ${BOLD}${GREEN}source ${shell_config}${RESET}"
-        echo ""
-    fi
-    
+
+    echo -e "${DIM}If commands aren't available in new shells, run:${RESET}"
+    echo -e "  ${BOLD}${GREEN}source ${shell_config}${RESET}"
+    echo ""
+
     echo -e "${DIM}Documentation: ${BLUE}https://github.com/${GITHUB_REPO}${RESET}"
     echo ""
 }
