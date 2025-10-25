@@ -5,7 +5,6 @@ FROM python:3.13-slim-trixie
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
     NODE_VERSION=24 \
     RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
