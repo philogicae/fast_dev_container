@@ -91,11 +91,35 @@ _prepare_save_config_args() {
 _container_exists() {
     _docker_exec "${2:-${FDEVC_DOCKER}}" ps -a --filter "name=^$1$" --format '{{.Names}}' 2>/dev/null | grep -q "^$1$"
 }
+_container_running() {
+    _docker_exec "${2:-${FDEVC_DOCKER}}" ps --filter "name=^$1$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^$1$"
+}
+_container_image_id() {
+    local image_id
+    image_id=$(_docker_exec "${2:-${FDEVC_DOCKER}}" inspect --format '{{.Image}}' "$1" 2>/dev/null || true)
+    echo "${image_id}"
+}
+
+_container_image_name() {
+    local image_name
+    image_name=$(_docker_exec "${2:-${FDEVC_DOCKER}}" inspect --format '{{.Config.Image}}' "$1" 2>/dev/null || true)
+    echo "${image_name}"
+}
+
+_remove_image_if_exists() {
+    local image_ref="$1" docker_cmd="${2:-${FDEVC_DOCKER}}"
+    [[ -z "${image_ref}" ]] && return 0
+    
+    # Try to remove the image (by name or ID)
+    # Docker will only remove the tag if multiple tags point to the same image
+    # If it's the last reference, it will remove the actual image
+    _docker_exec "${docker_cmd}" image rm "${image_ref}" >/dev/null 2>&1 || true
+}
 _get_container_by_index() {
-    local index="$1"
+    local id="$1"
     local docker_output
     docker_output=$(_docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^fdevc\\." --format '{{.Names}}|||{{.Status}}|||{{.Image}}' 2>/dev/null)
-    printf '%s\n' "${docker_output}" | ${FDEVC_PYTHON} "${UTILS_PY}" resolve_index "${CONFIG_FILE}" "${index}"
+    printf '%s\n' "${docker_output}" | ${FDEVC_PYTHON} "${UTILS_PY}" resolve_index "${CONFIG_FILE}" "${id}"
 }
 
 _load_config() {
@@ -117,6 +141,98 @@ _get_config() {
     _get_config_value "${config}" "${key}"
 }
 
+_container_created_at() {
+    local container_name="$1" docker_cmd="${2:-${FDEVC_DOCKER}}"
+    _docker_exec "${docker_cmd}" inspect --format '{{.Created}}' "${container_name}" 2>/dev/null || true
+}
+
+_handle_port_conflict() {
+    local error_output="$1" docker_cmd="${2:-${FDEVC_DOCKER}}"
+    
+    # Check if it's a port conflict
+    if echo "${error_output}" | grep -qE "(Bind for 0.0.0.0|port is already allocated|address already in use)"; then
+        local conflicting_port=""
+        
+        # Try multiple patterns to extract the port
+        conflicting_port=$(echo "${error_output}" | grep -oP 'Bind for 0.0.0.0:\K[0-9]+' | head -1)
+        if [[ -z "${conflicting_port}" ]]; then
+            conflicting_port=$(echo "${error_output}" | grep -oP '0.0.0.0:\K[0-9]+' | head -1)
+        fi
+        if [[ -z "${conflicting_port}" ]]; then
+            conflicting_port=$(echo "${error_output}" | grep -oP ':\K[0-9]+(?=: bind:)' | head -1)
+        fi
+        if [[ -z "${conflicting_port}" ]]; then
+            conflicting_port=$(echo "${error_output}" | grep -oP 'port \K[0-9]+' | head -1)
+        fi
+        
+        if [[ -n "${conflicting_port}" ]]; then
+            _msg_detail "Port ${conflicting_port} is already in use"
+            # Find which container is using this port
+            local blocking_container=$(_docker_exec "${docker_cmd}" ps -a --format '{{.Names}}|||{{.Ports}}' 2>/dev/null | grep ":${conflicting_port}->" | cut -d'|' -f1 | head -1)
+            if [[ -n "${blocking_container}" ]]; then
+                echo -e "  ${_c_bold}${_c_yellow}⚠ Blocked by container: ${_c_blue}${blocking_container}${_c_reset}"
+                echo -e "  ${_c_dim}Run: ${_c_reset}${_c_bold}fdevc stop ${blocking_container}${_c_reset}"
+            fi
+        else
+            # If we can't extract the port, just show generic message
+            _msg_detail "Port conflict detected"
+        fi
+    fi
+}
+
+_build_attach_command() {
+    local startup_cmd="$1"
+    local persist="${2:-false}"
+    local run_on_reattach="${3:-false}"  # true if -c was used (run every time)
+    
+    if [[ "${persist}" == "true" ]]; then
+        # For persistent containers, use tmux for session persistence
+        local session_name="fdevc_persistent"
+        local cmd="if command -v tmux >/dev/null 2>&1; then "
+        cmd+="  if tmux has-session -t ${session_name} 2>/dev/null; then "
+        cmd+="    echo -e '\\033[1m\\033[94m→ Reattaching to persistent session...\\033[0m'; "
+        # Run -c command even on reattach if specified
+        if [[ -n "${startup_cmd}" && "${run_on_reattach}" == "true" ]]; then
+            cmd+="    tmux send-keys -t ${session_name} 'cd /workspace; ${startup_cmd}' C-m; "
+        fi
+        cmd+="    exec tmux attach-session -t ${session_name}; "
+        cmd+="  else "
+        cmd+="    echo -e '\\033[1m\\033[94m→ Creating persistent session...\\033[0m'; "
+        cmd+="    cd /workspace; "
+        if [[ -n "${startup_cmd}" ]]; then
+            cmd+="    ${startup_cmd}; "
+        fi
+        # Create session with a shell that has exit function to detach
+        cmd+="    exec tmux new-session -s ${session_name} \"bash --rcfile <(echo 'source ~/.bashrc 2>/dev/null || true; exit() { tmux detach-client; }') -i\"; "
+        cmd+="  fi; "
+        cmd+="else "
+        cmd+="  echo -e '\\033[1m\\033[93m⚠ Warning: tmux not found, session will not persist\\033[0m'; "
+        cmd+="  cd /workspace; "
+        if [[ -n "${startup_cmd}" ]]; then
+            cmd+="  ${startup_cmd}; "
+        fi
+        cmd+="  exec bash -l; "
+        cmd+="fi"
+    else
+        # For non-persistent containers, reattach to tmux if exists but override exit to actually exit
+        local session_name="fdevc_persistent"
+        local cmd="if command -v tmux >/dev/null 2>&1 && tmux has-session -t ${session_name} 2>/dev/null; then "
+        cmd+="  echo -e '\\033[1m\\033[94m→ Reattaching to session (stop on exit)...\\033[0m'; "
+        # Override exit function to kill tmux session and then exit the shell
+        cmd+="  tmux send-keys -t ${session_name} 'exit() { tmux kill-session -t ${session_name}; builtin exit; }' C-m; "
+        cmd+="  exec tmux attach-session -t ${session_name}; "
+        cmd+="else "
+        cmd+="  cd /workspace"
+        if [[ -n "${startup_cmd}" ]]; then
+            cmd+="; ${startup_cmd}"
+        fi
+        cmd+="; exec bash -l; "
+        cmd+="fi"
+    fi
+    
+    echo "${cmd}"
+}
+
 _save_config() {
     local container_name="$1"
     local ports="$2"
@@ -125,9 +241,15 @@ _save_config() {
     local project_path="$5"
     local startup_cmd="$6"
     local socket_state="$7"
+    local created_at="$8"
+    local persist="$9"
 
     mkdir -p "$(dirname "${CONFIG_FILE}")"
-    ${FDEVC_PYTHON} "${UTILS_PY}" save_config "${CONFIG_FILE}" "${container_name}" "${ports}" "${image}" "${docker_cmd}" "${project_path}" "${startup_cmd}" "${socket_state}" 2>/dev/null
+    # Ensure we pass a proper string representation of the boolean
+    local persist_str="false"
+    [[ "${persist}" == "true" || "${persist}" == "1" ]] && persist_str="true"
+    
+    ${FDEVC_PYTHON} "${UTILS_PY}" save_config "${CONFIG_FILE}" "${container_name}" "${ports}" "${image}" "${docker_cmd}" "${project_path}" "${startup_cmd}" "${socket_state}" "${created_at}" "${persist_str}" 2>/dev/null
 }
 
 _remove_config() {
@@ -267,6 +389,13 @@ _merge_config() {
     fi
 
     local startup_cmd="$(_get_config_value "${config}" "startup_cmd" "")"
+    local persist_mode_raw="$(_get_config_value "${config}" "persist" "false")"
+    local persist_mode_value="false"
+    local persist_mode_lower
+    persist_mode_lower=$(printf '%s' "${persist_mode_raw}" | tr '[:upper:]' '[:lower:]')
+    case "${persist_mode_lower}" in
+        true|"1"|yes) persist_mode_value="true" ;;
+    esac
     
     # Convert Dockerfile to absolute path
     if [[ -f "${image}" ]]; then
@@ -274,13 +403,14 @@ _merge_config() {
     fi
     
     # Output as space-separated values
-    echo "${ports}|${image}|${docker_cmd}|${project_path}|${startup_cmd}|${socket_value}|${config_present}"
+    echo "${ports}|${image}|${docker_cmd}|${project_path}|${startup_cmd}|${socket_value}|${config_present}|${persist_mode_value}"
 }
 
 _fdevc_start() {
     local container_arg="" ports_override="" image_override="" docker_cmd_override="" detach=false remove_on_exit=false
-    local no_volume=false no_socket=false force_new=false vm_mode=false
-    local startup_cmd_once="" startup_cmd_save="" startup_cmd_save_flag=false
+    local no_volume=false no_socket=false force_new=false force_recreate=false vm_mode=false
+    local startup_cmd_once="" startup_cmd_save="" startup_cmd_save_flag=false ignore_startup_cmd=false
+    local detach_user_set=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -288,11 +418,14 @@ _fdevc_start() {
             -i) image_override="$2"; shift 2 ;;
             --dkr) docker_cmd_override="$2"; shift 2 ;;
             --tmp) remove_on_exit=true; shift ;;
-            -d) detach=true; shift ;;
+            -d) detach=true; detach_user_set=true; shift ;;
+            --no-d) detach=false; detach_user_set=true; shift ;;
             --no-v) no_volume=true; shift ;;
             --no-s) no_socket=true; shift ;;
             -c) startup_cmd_once="$2"; shift 2 ;;
             --c-s) startup_cmd_once="$2"; startup_cmd_save="$2"; startup_cmd_save_flag=true; shift 2 ;;
+            --no-c) ignore_startup_cmd=true; shift ;;
+            -f|--force) force_recreate=true; shift ;;
             --new) force_new=true; shift ;;
             --vm) vm_mode=true; no_volume=true; no_socket=true; shift ;;
             *) 
@@ -307,12 +440,21 @@ _fdevc_start() {
     done
 
     if [[ "${remove_on_exit}" == true && "${detach}" == true ]]; then
-        _msg_info "--tmp overrides -d; container will be stopped and removed."
+        _msg_info "--tmp overrides -d; container stops and is removed."
         detach=false
     fi
-    
+
+    if [[ "${ignore_startup_cmd}" == true ]]; then
+        startup_cmd_once=""
+        startup_cmd_save=""
+        startup_cmd_save_flag=false
+    fi
+
     local overrides_supplied=false
     [[ -n "${ports_override}" || -n "${image_override}" || -n "${docker_cmd_override}" ]] && overrides_supplied=true
+    local container_running=false
+    local container_was_running=false
+    local image_to_remove_after_create=""
 
     # Determine container name based on mode
     local container_name
@@ -330,14 +472,26 @@ _fdevc_start() {
         config_target_name="${container_name}"
     else
         container_name="$(_resolve_container_name "${container_arg}")"
-        [[ -z "${container_name}" ]] && { _msg_error "No container found at index ${container_arg}. Run 'fdevc ls'."; return 1; }
+        [[ -z "${container_name}" ]] && { _msg_error "No container found at id ${container_arg}. Run 'fdevc ls'."; return 1; }
         config_target_name="${container_name}"
     fi
 
-    if [[ "${remove_on_exit}" == true ]]; then
-        # Remove .tmp if already present, then add it at the end
-        container_name="${container_name%.tmp}.tmp"
+    # Prefer base configuration when available (unless tmp requested)
+    if [[ "${force_new}" != true && "${remove_on_exit}" != true ]]; then
+        local base_config_name="${config_target_name}"
+        base_config_name="${base_config_name%.tmp}"
+        if [[ "${base_config_name}" != "${config_target_name}" ]]; then
+            local base_config_json
+            base_config_json="$(_load_config "${base_config_name}")"
+            if [[ -n "${base_config_json}" && "${base_config_json}" != "{}" ]]; then
+                config_target_name="${base_config_name}"
+                container_name="${base_config_name}"
+            fi
+        fi
     fi
+
+    local base_container_name="${container_name}"
+    base_container_name="${base_container_name%.tmp}"
 
     local socket_override_arg=""
     [[ "${no_socket}" == true ]] && socket_override_arg="false"
@@ -351,63 +505,171 @@ _fdevc_start() {
         # New mode: use current directory
         merge_project_path="$PWD"
     fi
-    IFS='|' read -r ports image_config docker_cmd project_path startup_cmd_config socket_config config_present <<< "$(_merge_config "${config_target_name}" "${ports_override}" "${image_override}" "${docker_cmd_override}" "${merge_project_path}" "${socket_override_arg}")"
+    IFS='|' read -r ports image_config docker_cmd project_path startup_cmd_config socket_config config_present persist_mode_config <<< "$(_merge_config "${config_target_name}" "${ports_override}" "${image_override}" "${docker_cmd_override}" "${merge_project_path}" "${socket_override_arg}")"
     local startup_cmd_session="${startup_cmd_once:-${startup_cmd_config}}"
+    local run_on_reattach=false
+    [[ -n "${startup_cmd_once}" ]] && run_on_reattach=true
     local startup_cmd_to_save="${startup_cmd_config}"
     if [[ "${startup_cmd_save_flag}" == true ]]; then
         startup_cmd_to_save="${startup_cmd_save}"
     fi
+
+    if [[ "${ignore_startup_cmd}" == true ]]; then
+        startup_cmd_session=""
+    fi
+
+    # If user explicitly set detach mode, mirror it into persist setting
+    if [[ "${detach_user_set}" == true ]]; then
+        if [[ "${detach}" == "true" && "${remove_on_exit}" != "true" ]]; then
+            persist_mode_config="true"
+        else
+            persist_mode_config="false"
+        fi
+    fi
     
-    # Resolve image (build from Dockerfile if needed)
-    local image=$(_resolve_image "${image_config}" "${docker_cmd}" "${container_name}") || { _msg_error "Failed to resolve image"; return 1; }
-    
+    # Use persist_mode_config as the source of truth
+    local persist_from_config="${persist_mode_config}"
+
+    # Auto-enable detach if persist is true and not explicitly set by user
+    if [[ "${persist_from_config}" == "true" && "${detach_user_set}" == false && "${remove_on_exit}" != true ]]; then
+        detach=true
+    fi
+
+    if [[ "${remove_on_exit}" == true ]]; then
+        container_name="${base_container_name}.tmp"
+    else
+        container_name="${base_container_name}"
+    fi
+
     # Check if container exists (skip for force_new)
     local container_exists=false
     if [[ "${force_new}" != true ]] && _container_exists "${container_name}" "${docker_cmd}"; then
         container_exists=true
     fi
 
-    if [[ "${container_exists}" == true && "${overrides_supplied}" == true ]]; then
-        _msg_info "Removing existing '${container_name}' to apply overrides..."
-        if ! _docker_exec "${docker_cmd}" rm -f "${container_name}" >/dev/null 2>&1; then
-            _msg_error "Failed to recreate container with overrides"
-            return 1
+    if [[ "${container_exists}" == true ]]; then
+        if _container_running "${container_name}" "${docker_cmd}"; then
+            container_running=true
+            container_was_running=true
         fi
-        container_exists=false
+    fi
+
+    local desired_effective_project_path="${project_path}"
+    if [[ "${no_volume}" == true ]]; then
+        desired_effective_project_path=""
+    fi
+    local desired_project_to_save="" desired_socket_to_save=""
+    IFS='|' read -r desired_project_to_save desired_socket_to_save <<< "$(_prepare_save_config_args "${no_volume}" "${no_socket}" "${desired_effective_project_path}" "${socket_config}")"
+
+    local config_differs=false
+    if [[ "${force_recreate}" == true ]]; then
+        local saved_config="$(_load_config "${container_name}")"
+        if [[ -n "${saved_config}" && "${saved_config}" != "{}" ]]; then
+            local saved_ports saved_image saved_docker_cmd saved_project_path saved_socket_state
+            saved_ports=$(_get_config_value "${saved_config}" "ports" "")
+            saved_image=$(_get_config_value "${saved_config}" "image" "")
+            saved_docker_cmd=$(_get_config_value "${saved_config}" "docker_cmd" "")
+            saved_project_path=$(_get_config_value "${saved_config}" "project_path" "")
+            saved_socket_state=$(_get_config_value "${saved_config}" "socket" "")
+            if [[ "${saved_ports}" != "${ports}" || "${saved_image}" != "${image_config}" || "${saved_docker_cmd}" != "${docker_cmd}" || "${saved_project_path}" != "${desired_project_to_save}" || "${saved_socket_state}" != "${desired_socket_to_save}" ]]; then
+                config_differs=true
+            fi
+        else
+            if [[ "${overrides_supplied}" == true || "${no_socket}" == true || "${no_volume}" == true ]]; then
+                config_differs=true
+            fi
+        fi
+    fi
+
+    if [[ "${container_exists}" == true ]]; then
+        local should_recreate=false
+        if [[ "${force_recreate}" == true && "${config_differs}" == true ]]; then
+            should_recreate=true
+        elif [[ "${overrides_supplied}" == true ]]; then
+            if [[ "${container_running}" == true ]]; then
+                _msg_info "Running '${container_name}'; overrides ignored. Use --new/-f or stop first."
+                overrides_supplied=false
+            else
+                should_recreate=true
+            fi
+        fi
+
+        if [[ "${should_recreate}" == true ]]; then
+            image_to_remove_after_create="$(_container_image_name "${container_name}" "${docker_cmd}")"
+            if [[ "${container_running}" == true ]]; then
+                _msg_info "Recreating '${container_name}' (remove running container)..."
+            else
+                _msg_info "Recreating '${container_name}' with new settings..."
+            fi
+            if ! _docker_exec "${docker_cmd}" rm -f "${container_name}" >/dev/null 2>&1; then
+                _msg_error "Failed to recreate container with new settings"
+                return 1
+            fi
+            container_exists=false
+            container_running=false
+            container_was_running=false
+        fi
     fi
 
     local exec_status=0
+    # Determine persist mode: user override takes precedence over config
+    local persist_to_save="${persist_from_config}"
+    
+    # Temporary containers are never persistent
+    if [[ "${remove_on_exit}" == true ]]; then
+        persist_to_save="false"
+    elif [[ "${detach_user_set}" == true ]]; then
+        if [[ "${detach}" == "true" ]]; then
+            persist_to_save="true"
+        else
+            persist_to_save="false"
+        fi
+    fi
 
     if [[ "${container_exists}" == true ]]; then
-        _msg_info "Starting '${container_name}'..."
-        [[ -n "${ports}" ]] && _msg_detail "Ports: ${ports}"
-        _msg_docker_cmd "${docker_cmd} start ${container_name}"
-        _docker_exec "${docker_cmd}" start "${container_name}" >/dev/null 2>&1 || { _msg_error "Failed to start"; return 1; }
-
         if [[ "${remove_on_exit}" != true ]]; then
-            local effective_project_path="${project_path}"
-            if [[ "${no_volume}" == true ]]; then
-                effective_project_path=""
-            fi
-            IFS='|' read -r project_to_save socket_to_save <<< "$( _prepare_save_config_args "${no_volume}" "${no_socket}" "${effective_project_path}" "${socket_config}" )"
-            local project_path_to_store="${project_to_save}"
-            if [[ "${startup_cmd_save_flag}" == true || "${config_present}" != "true" || "${overrides_supplied}" == true || "${no_socket}" == true || "${no_volume}" == true ]]; then
-                _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${project_path_to_store}" "${startup_cmd_to_save}" "${socket_to_save}"
-            fi
+            local created_at_current_save="$(_container_created_at "${container_name}" "${docker_cmd}")"
+            _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "${created_at_current_save}" "${persist_to_save}"
         fi
-        if [[ "${detach}" == true ]]; then
-            _msg_success "Container '${container_name}' is running in background (detach mode)."
+
+        if [[ "${container_running}" == true ]]; then
+            _msg_info "Already running: '${container_name}'"
         else
-            _msg_success "Attaching..."
-            if [[ -n "${startup_cmd_session}" ]]; then
-                _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${startup_cmd_session}; exec bash"
-            else
-                _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash
+            _msg_info "Starting '${container_name}'..."
+            [[ -n "${ports}" ]] && _msg_detail "Ports: ${ports}"
+            _msg_docker_cmd "${docker_cmd} start ${container_name}"
+            local start_error exit_code
+            start_error=$(_docker_exec "${docker_cmd}" start "${container_name}" 2>&1)
+            exit_code=$?
+            if [[ ${exit_code} -ne 0 ]]; then
+                _msg_error "Failed to start"
+                _handle_port_conflict "${start_error}" "${docker_cmd}"
+                return 1
             fi
-            exec_status=$?
+            container_running=true
         fi
+        if [[ "${remove_on_exit}" == true && "${container_was_running}" == true ]]; then
+            _msg_info "--tmp ignored (container already running)."
+            remove_on_exit=false
+        fi
+
+        local attach_message="Attaching (stop on exit)..."
+        if [[ "${detach}" == true ]]; then
+            attach_message="Attaching (persist on exit)..."
+        fi
+        _msg_success "${attach_message}"
+        local attach_cmd
+        attach_cmd=$(_build_attach_command "${startup_cmd_session}" "${persist_to_save}" "${run_on_reattach}")
+        _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${attach_cmd}"
+        exec_status=$?
     else
-        _msg_info "Creating '${container_name}' [${image}]"
+        if [[ "${remove_on_exit}" != true ]]; then
+            _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "" "${persist_to_save}"
+        fi
+
+        local image=$(_resolve_image "${image_config}" "${docker_cmd}" "${container_name}") || { _msg_error "Failed to resolve image"; return 1; }
+
+        _msg_info "Creating '${container_name}' (image: ${image})"
         [[ -n "${ports}" ]] && _msg_detail "Ports: ${ports}"
 
         local port_flags_arr=()
@@ -426,32 +688,39 @@ _fdevc_start() {
         run_args+=("${port_flags_arr[@]}" "${image}")
 
         _msg_docker_cmd "${docker_cmd} run ${run_args[*]}"
-        _docker_exec "${docker_cmd}" run "${run_args[@]}" || { _msg_error "Failed to create"; return 1; }
+        local error_output exit_code
+        error_output=$(_docker_exec "${docker_cmd}" run "${run_args[@]}" 2>&1)
+        exit_code=$?
+        if [[ ${exit_code} -ne 0 ]]; then
+            _msg_error "Failed to create"
+            _handle_port_conflict "${error_output}" "${docker_cmd}"
+            return 1
+        fi
         if [[ "${remove_on_exit}" != true ]]; then
-            local project_to_save socket_to_save
-            local effective_project_path="${project_path}"
-            if [[ "${no_volume}" == true ]]; then
-                effective_project_path=""
+            local created_at_current_post="$(_container_created_at "${container_name}" "${docker_cmd}")"
+            if [[ -n "${created_at_current_post}" ]]; then
+                _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "${created_at_current_post}" "${persist_to_save}"
             fi
-            IFS='|' read -r project_to_save socket_to_save <<< "$( _prepare_save_config_args "${no_volume}" "${no_socket}" "${effective_project_path}" "${socket_config}" )"
-            local project_path_to_store="${project_to_save}"
-            _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${project_path_to_store}" "${startup_cmd_to_save}" "${socket_to_save}"
         fi
 
+        local post_create_message="Created, attaching (stop on exit)..."
         if [[ "${detach}" == true ]]; then
-            _msg_success "Container '${container_name}' created and running in background (detach mode)."
-        else
-            _msg_success "Created, attaching..."
-            if [[ -n "${startup_cmd_session}" ]]; then
-                _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${startup_cmd_session}; exec bash"
-            else
-                _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash
-            fi
-            exec_status=$?
+            post_create_message="Created; attaching (persist on exit)..."
+        fi
+        _msg_success "${post_create_message}"
+        local attach_cmd
+        attach_cmd=$(_build_attach_command "${startup_cmd_session}" "${persist_to_save}" "${run_on_reattach}")
+        _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${attach_cmd}"
+        exec_status=$?
+
+        if [[ -n "${image_to_remove_after_create}" ]]; then
+            _remove_image_if_exists "${image_to_remove_after_create}" "${docker_cmd}"
         fi
     fi
 
-    if [[ "${detach}" == true ]]; then
+    # Only skip stopping if persist mode is enabled
+    # If user explicitly set non-persistent (--no-d), we should stop even if container was running
+    if [[ "${persist_to_save}" == "true" ]]; then
         return "${exec_status}"
     fi
 
@@ -462,8 +731,10 @@ _fdevc_start() {
         if [[ "${remove_on_exit}" == true ]]; then
             _msg_info "Removing '${container_name}'..."
             _msg_docker_cmd "${docker_cmd} rm -f ${container_name}"
+            local image_to_remove_on_exit="$(_container_image_name "${container_name}" "${docker_cmd}")"
             if _docker_exec "${docker_cmd}" rm -f "${container_name}" >/dev/null 2>&1; then
                 _msg_success "Removed"
+                _remove_image_if_exists "${image_to_remove_on_exit}" "${docker_cmd}"
             else
                 _msg_error "Failed to remove '${container_name}'"
             fi
@@ -496,7 +767,7 @@ _fdevc_stop() {
     done
 
     local container_name="$(_resolve_container_name "${container_arg}")"
-    [[ -z "${container_name}" ]] && { _msg_error "No container found at index ${container_arg}. Run 'fdevc ls'."; return 1; }
+    [[ -z "${container_name}" ]] && { _msg_error "No container found at id ${container_arg}. Run 'fdevc ls'."; return 1; }
 
     local docker_cmd="${docker_cmd_override:-$(_get_config "${container_name}" "docker_cmd")}"
     docker_cmd="${docker_cmd:-${FDEVC_DOCKER}}"
@@ -520,7 +791,7 @@ _fdevc_rm() {
     done
     
     local container_name="$(_resolve_container_name "${container_arg}")"
-    [[ -z "${container_name}" ]] && { _msg_error "No container found at index ${container_arg}. Run 'fdevc ls'."; return 1; }
+    [[ -z "${container_name}" ]] && { _msg_error "No container found at id ${container_arg}. Run 'fdevc ls'."; return 1; }
 
     local docker_cmd="${docker_cmd_override:-$(_get_config "${container_name}" "docker_cmd")}"
     docker_cmd="${docker_cmd:-${FDEVC_DOCKER}}"
@@ -547,6 +818,12 @@ _fdevc_rm() {
         fi
     fi
 
+    # Get image name before removing container
+    local image_to_remove=""
+    if [[ "${with_config}" == true ]]; then
+        image_to_remove="$(_container_image_name "${container_name}" "${docker_cmd}")"
+    fi
+    
     # Remove container
     if [[ "${force}" == true ]]; then
         _msg_info "Force removing '${container_name}'..."
@@ -555,15 +832,18 @@ _fdevc_rm() {
     else
         _msg_info "Stopping and removing '${container_name}'..."
         _msg_docker_cmd "${docker_cmd} stop ${container_name}"
-        _docker_exec "${docker_cmd}" stop "${container_name}" >/dev/null 2>&1 || { _msg_error "Failed to stop. Use -f to force."; return 1; }
+        _docker_exec "${docker_cmd}" stop "${container_name}" >/dev/null 2>&1 || { _msg_error "Failed to stop. Use -f to force"; return 1; }
         _msg_docker_cmd "${docker_cmd} rm ${container_name}"
-        _docker_exec "${docker_cmd}" rm "${container_name}" >/dev/null 2>&1 || { _msg_error "Failed to remove"; return 1; }
+        _docker_exec "${docker_cmd}" rm "${container_name}" >/dev/null 2>&1 || { _msg_error "Failed to remove container"; return 1; }
     fi
     
-    # Handle config
+    # Handle config and image
     if [[ "${with_config}" == true ]]; then
         _remove_config "${container_name}"
-        _msg_success "Container and config deleted"
+        if [[ -n "${image_to_remove}" ]]; then
+            _remove_image_if_exists "${image_to_remove}" "${docker_cmd}"
+        fi
+        _msg_success "Container, config, and image deleted"
     else
         _msg_success "Container deleted (config preserved)"
     fi
@@ -593,8 +873,49 @@ _fdevc_help() {
 }
 
 _fdevc_ls() {
-    _docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^fdevc\\." --format '{{.Names}}|||{{.Status}}|||{{.Image}}|||{{.Mounts}}|||{{.Label "fdevc.socket"}}' 2>/dev/null | \
+    _docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^fdevc\\." --format '{{.Names}}|||{{.Status}}|||{{.Image}}|||{{.Mounts}}|||{{.Label "fdevc.socket"}}|||{{.CreatedAt}}' 2>/dev/null | \
     ${FDEVC_PYTHON} "${UTILS_PY}" list_containers "${CONFIG_FILE}"
+}
+
+_fdevc_config() {
+    local remove_all=false
+    local remove_target=""
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --rm)
+                if [[ -n "$2" && "$2" != -* ]]; then
+                    remove_target="$2"
+                    shift 2
+                else
+                    remove_all=true
+                    shift
+                fi
+                ;;
+            *)
+                _msg_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    if [[ "${remove_all}" == true ]]; then
+        ${FDEVC_PYTHON} "${UTILS_PY}" remove_all_configs "${CONFIG_FILE}"
+    elif [[ -n "${remove_target}" ]]; then
+        # Check if it's an id
+        if [[ "${remove_target}" =~ ^[0-9]+$ ]]; then
+            local container_name=$(_get_container_by_index "${remove_target}")
+            if [[ -z "${container_name}" ]]; then
+                _msg_error "No configuration found at id ${remove_target}"
+                return 1
+            fi
+            remove_target="${container_name}"
+        fi
+        _remove_config "${remove_target}"
+        _msg_success "Configuration '${remove_target}' removed"
+    else
+        ${FDEVC_PYTHON} "${UTILS_PY}" list_configs "${CONFIG_FILE}"
+    fi
 }
 
 # Main dispatcher function
@@ -630,6 +951,10 @@ fdevc() {
         custom)
             shift
             _fdevc_custom "$@"
+            ;;
+        config)
+            shift
+            _fdevc_config "$@"
             ;;
         vm)
             shift

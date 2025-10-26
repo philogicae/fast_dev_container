@@ -1,14 +1,8 @@
-```bash
-    ______           __     ____               ______            __        _                
-   / ____/___ ______/ /_   / __ \___ _   __   / ____/___  ____  / /_____ _(_)___  ___  _____
-  / /_  / __ `/ ___/ __/  / / / / _ \ | / /  / /   / __ \/ __ \/ __/ __ `/ / __ \/ _ \/ ___/
- / __/ / /_/ (__  ) /_   / /_/ /  __/ |/ /  / /___/ /_/ / / / / /_/ /_/ / / / / /  __/ /    
-/_/    \__,_/____/\__/  /_____/\___/|___/   \____/\____/_/ /_/\__/\__,_/_/_/ /_/\___/_/     
-```
+![Fast Dev Container](banner.png)
 
-Lightweight helpers for repeatable dev environments.
+Lightweight CLI for fast & repeatable dev environments.
 
-Create or attach a container for the current directory, then shut it down automatically when you exit.
+Create or attach a container for the current directory. Stops on exit unless using persistent mode (-d flag).
 
 [![Python](https://img.shields.io/badge/python-3%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -33,89 +27,45 @@ source ~/.bashrc  # or ~/.zshrc
 ## Usage
 
 ```bash
-# Attach to/create a project container. Stops on exit unless -d.
-fdevc [index|name] [OPTIONS]
-# Or explicitly:
-fdevc start [index|name] [OPTIONS]
-
-# Create a timestamped container for the current directory.
-fdevc new [OPTIONS]
-
-# Create a VM-like container (no volume/socket mounts).
-fdevc vm [OPTIONS]
-
-# Stop a running container.
-fdevc stop [index|name] [--dkr CMD]
-
-# Stop and remove a container; add --all to delete saved config.
-fdevc rm [index|name] [-f] [--all] [--dkr CMD]
-
-# Copy template Dockerfile to current directory as fdevc.Dockerfile.
-fdevc custom
-
-# Show all fdevc containers (● running, ○ stopped, ◌ saved).
-fdevc ls
-
-# Show detailed help
-fdevc [-h|--help]
+fdevc [id|name] [OPTIONS]     # Start/attach container (omit id|name for current dir)
+fdevc new [OPTIONS]           # Create timestamped container
+fdevc vm [OPTIONS]            # Create VM-like container (no volume/socket)
+fdevc ls                      # List containers (● running, ○ stopped, ◌ saved)
+fdevc stop [id|name]          # Stop container (omit for current dir)
+fdevc rm [id|name] [--all]    # Remove container (--all deletes config)
+fdevc config [--rm] [id|name] # Show/manage saved configs
+fdevc custom                  # Copy template Dockerfile as fdevc.Dockerfile
+fdevc --help                  # Show detailed help
 ```
 
-**Options for fdevc (or fdevc start), fdevc new, and fdevc vm:**
-- `-p PORTS` - Port mappings (space-separated, e.g., "8080 3000:3001")
-- `-i IMAGE|DOCKERFILE` - Docker image or path to Dockerfile
-- `--dkr CMD` - Use alternative container runtime (e.g., podman)
-- `-c CMD` - Run command once on attach (not saved)
-- `--c-s CMD` - Run command on attach and save for future sessions
-- `-d` - Detach mode (keep container running after exit)
-- `--tmp` - Temporary mode (remove container on exit, overrides -d)
-- `--no-v` - Skip volume mount (no project directory access)
-- `--no-s` - Skip Docker socket mount (no nested containers)
+**Common options:**
+- `-i IMAGE|DOCKERFILE` - Custom image or Dockerfile path
+- `-p "8080 3000:3001"` - Port mappings (space-separated)
+- `-c CMD` / `--c-s CMD` - Run command on attach (--c-s saves for future)
+- `-d` / `--tmp` - Persist on exit / Remove on exit
+- `-f, --force` - Recreate if config differs
+- `--dkr podman` - Use alternative runtime
+- `--no-v` / `--no-s` - Skip volume/socket mount
 
-**Note:** `fdevc vm` automatically applies `--no-v` and `--no-s`.
-
-**Status indicators:** running ● · stopped ○ · saved ◌
+**Notes:** Use `fdevc.Dockerfile` in current dir for custom image (create with `fdevc custom`). Use `fdevc ls` to get container indices. Run `fdevc --help` for all options.
 
 ## Examples
 
 ```bash
-# Start container for current directory
-fdevc
-
-# Start with port mappings (space-separated ports to expose or host:container)
-fdevc -p "8080:80 3000"
-
-# Start with custom image
-fdevc -i ubuntu:22.04
-
-# Start with startup command
-# Run command once on attach (not saved)
-fdevc -c "npm run dev"
-# Run command on attach and save for future sessions
-fdevc --c-s "npm run dev"
-
-# Create temporary test environment without volume mount
-fdevc new --tmp --no-v
-
-# Create isolated VM-like container (no volumes or socket)
-fdevc vm
-
-# Create temporary VM with custom image
-fdevc vm --tmp -i debian:13-slim
-
-# Start by index from fdevc ls
-fdevc 1
-
-# Use Podman instead of Docker
-fdevc --dkr podman
+fdevc                              # Start/attach container for current dir
+fdevc -p "8080:80 3000"            # With port mappings
+fdevc -i ubuntu:22.04              # With custom image
+fdevc --c-s "npm run dev"          # With saved startup command
+fdevc new --tmp --no-v             # Temporary isolated environment
+fdevc vm -i debian:13-slim         # VM-like container
+fdevc ls                           # List all (use id to start: fdevc 1)
+fdevc --dkr podman                 # Use Podman instead of Docker
 ```
 
-## Config
+## Configuration
 
-> Settings saved to `~/.fdevc/.dev_config.json`.
+Settings saved to `~/.fdevc/.dev_config.json`. Override defaults with environment variables:
 
-**Local Dockerfile:** If `fdevc.Dockerfile` exists in the current directory, it will be used by default instead of the global template. Use `fdevc custom` to create one.
-
-Override default values with environment variables:
 ```bash
 export FDEVC_PYTHON="python3" # Path/interpreter for Python
 export FDEVC_DOCKER="podman" # Docker, Podman, containerd

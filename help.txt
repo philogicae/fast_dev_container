@@ -4,38 +4,37 @@ Fast Dev Container - Lightweight Container Dev Environments
 COMMANDS
 --------
 
-fdevc [index|name] [OPTIONS]
-    Attach to or create a project container based on current directory.
+fdevc [id|name] [OPTIONS]
+    Start/attach container for current directory.
     Container stops automatically on exit unless -d flag is used.
-    Equivalent to: fdevc start [index|name] [OPTIONS]
+    Equivalent to: fdevc start [id|name] [OPTIONS]
     
     Arguments:
-        index|name    Container index from fdevc ls or explicit container name
-                     (omit to use current directory name)
+        id|name       Container id or name from fdevc ls (omit for current directory)
     
     Options:
-        -p PORTS      Port mappings (space-separated, e.g., "8080 3000:3001")
-        -i IMAGE      Docker image name or path to Dockerfile
         --dkr CMD     Docker-compatible command (docker, podman, etc.)
+        -i IMAGE      Docker image name or path to Dockerfile
+        -p PORTS      Port mappings (space-separated, e.g., "8080 3000:3001")
         -c CMD        Run command once on attach (not saved)
         --c-s CMD     Run command on attach and save for future sessions
-        -d            Detach mode - keep container running after exit
-        --tmp         Temporary mode - remove container on exit (overrides -d)
+        -f, --force   Recreate container if arguments differ
+        -d            Detach mode (persist on exit)
+        --no-d        Attach mode (default)
+        --tmp         Temporary mode (remove container on exit, overrides -d)
         --no-v        Skip volume mount (no project directory access)
         --no-s        Skip Docker socket mount (no nested containers)
+        --no-c        Skip startup command
 
-fdevc start [index|name] [OPTIONS]
-    Explicitly attach to or create a project container.
-    Same as calling fdevc without a subcommand.
-    
-    Arguments and Options: Same as fdevc (above)
+fdevc start [id|name] [OPTIONS]
+    Explicit alias for fdevc (above)
 
 fdevc new [OPTIONS]
     Create a new timestamped container for current directory.
     Useful for parallel isolated environments.
     
     Options:
-        Same as fdevc start (except no index|name argument)
+        Same as fdevc start (except no id|name argument)
 
 fdevc vm [OPTIONS]
     Create a VM-like container with no volume or socket mounts.
@@ -43,28 +42,31 @@ fdevc vm [OPTIONS]
     Container name: fdevc.vm.<random-name>
     
     Options:
-        -p PORTS      Port mappings (space-separated)
-        -i IMAGE      Docker image name or path to Dockerfile
         --dkr CMD     Docker-compatible command (docker, podman, etc.)
+        -i IMAGE      Docker image name or path to Dockerfile
+        -p PORTS      Port mappings (space-separated)
         -c CMD        Run command once on attach (not saved)
         --c-s CMD     Run command on attach and save for future sessions
-        -d            Detach mode - keep container running after exit
-        --tmp         Temporary mode - remove container on exit
+        -f, --force   Recreate container if arguments differ
+        -d            Detach mode (persist on exit)
+        --no-d        Attach mode (default)
+        --tmp         Temporary mode (remove container on exit, overrides -d)
+        --no-c        Ignore saved and requested startup commands
 
-fdevc stop [index|name] [OPTIONS]
+fdevc stop [id|name] [OPTIONS]
     Stop a running container without removing it.
     
     Arguments:
-        index|name    Container index from fdevc ls or explicit container name
+        id|name       Container id or name from fdevc ls (omit for current directory)
     
     Options:
         --dkr CMD     Docker-compatible command (docker, podman, etc.)
 
-fdevc rm [index|name] [OPTIONS]
+fdevc rm [id|name] [OPTIONS]
     Stop and remove a container.
     
     Arguments:
-        index|name    Container index from fdevc ls or explicit container name
+        id|name       Container id or name from fdevc ls (omit for current directory)
     
     Options:
         -f, --force   Force remove without stopping gracefully
@@ -75,9 +77,17 @@ fdevc ls
     List all fdevc containers with their status and configuration.
     
     Status indicators:
-        ● running   - Container is currently running
-        ○ stopped   - Container exists but is stopped
-        ◌ saved     - Configuration saved but container removed
+        Running ●   - Container is currently running
+        Stopped ○   - Container exists but is stopped
+        Saved ◌     - Configuration saved but container removed
+
+fdevc config [OPTIONS]
+    Display or manage saved configurations.
+    
+    Options:
+        (none)           Display all saved configurations in a table
+        --rm             Remove all saved configurations
+        --rm INDEX|NAME  Remove configuration for specific container
 
 fdevc custom
     Copy the template Dockerfile to current directory as fdevc.Dockerfile
