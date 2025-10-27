@@ -35,6 +35,7 @@ fdevc stop [id|name]          # Stop container (omit for current dir)
 fdevc rm [id|name] [--all]    # Remove container (--all deletes config)
 fdevc config [--rm] [id|name] # Show/manage saved configs
 fdevc custom                  # Copy template Dockerfile as fdevc.Dockerfile
+fdevc gen <name>              # Create fdevc runnable project
 fdevc --help                  # Show detailed help
 ```
 
@@ -62,6 +63,7 @@ fdevc --cp 1 -n myproject          # Copy config from container #1, use custom n
 fdevc new --tmp --no-v             # Temporary isolated environment
 fdevc new -n test-env              # Create named container (no timestamp)
 fdevc vm -i debian:13-slim -n dev  # VM-like container with custom name
+fdevc gen my-project               # Create shareable config project
 fdevc ls                           # List all (use id to start: fdevc 1)
 fdevc --dkr podman                 # Use Podman instead of Docker
 ```

@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 : "${FDEVC_PYTHON:=python3}"
 : "${FDEVC_DOCKER:=docker}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
@@ -173,6 +175,42 @@ _handle_port_conflict() {
             _msg_detail "Port conflict detected"
         fi
     fi
+}
+
+_copy_local_script_to_container() {
+    local container_name="$1"
+    local docker_cmd="$2"
+    local startup_cmd="$3"
+    
+    if [[ -z "${startup_cmd}" ]]; then
+        echo "${startup_cmd}"
+        return 0
+    fi
+    
+    local script_path="${startup_cmd%% *}"  # Extract first word (script path)
+    if [[ -f "${script_path}" || ( "${script_path}" == ./* && -f "${script_path#./}" ) ]]; then
+        local source_file="${script_path}"
+        [[ "${source_file}" == ./* ]] && source_file="${source_file#./}"
+        if [[ -f "${source_file}" ]]; then
+            { _msg_info "Copying local script to container..."; } >&2
+            { _msg_detail "Source: ${source_file}"; } >&2
+            _docker_exec "${docker_cmd}" exec "${container_name}" mkdir -p /workspace >/dev/null 2>&1
+            _docker_exec "${docker_cmd}" cp "${source_file}" "${container_name}:/workspace/$(basename "${source_file}")" >/dev/null 2>&1
+            if [[ $? -eq 0 ]]; then
+                # Make the script executable
+                _docker_exec "${docker_cmd}" exec "${container_name}" chmod +x "/workspace/$(basename "${source_file}")" >/dev/null 2>&1
+                { _msg_success "Script copied to /workspace/$(basename "${source_file}")"; } >&2
+                # Update startup command to use the copied script
+                local basename_script="$(basename "${source_file}")"
+                echo "${startup_cmd/${script_path}/./${basename_script}}"
+                return 0
+            else
+                _msg_error "Failed to copy script to container"
+            fi
+        fi
+    fi
+    
+    echo "${startup_cmd}"
 }
 
 _build_attach_command() {
@@ -500,16 +538,27 @@ _fdevc_start() {
         fi
         
         # Check for name collision (exact match or with .tmp suffix)
-        local collision_check
-        collision_check=$(_docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^${proposed_name}$" --filter "name=^${proposed_name}.tmp$" --format '{{.Names}}' 2>/dev/null | head -1)
-        if [[ -z "${collision_check}" && -f "${CONFIG_FILE}" ]]; then
-            # Also check saved configs
-            collision_check=$(${FDEVC_PYTHON} -c "import json; data = json.load(open('${CONFIG_FILE}')); print('${proposed_name}' if '${proposed_name}' in data or '${proposed_name}.tmp' in data else '')" 2>/dev/null)
-        fi
-        if [[ -n "${collision_check}" ]]; then
-            _msg_error "Name collision: container '${collision_check}' already exists"
-            _msg_detail "Choose a different basename with -n or remove the existing container"
-            return 1
+        if [[ "${force_recreate}" != true ]]; then
+            local collision_check
+            collision_check=$(_docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^${proposed_name}$" --filter "name=^${proposed_name}.tmp$" --format '{{.Names}}' 2>/dev/null | head -1)
+            if [[ -z "${collision_check}" && -f "${CONFIG_FILE}" ]]; then
+                # Also check saved configs
+                collision_check=$(${FDEVC_PYTHON} -c "import json; data = json.load(open('${CONFIG_FILE}')); print('${proposed_name}' if '${proposed_name}' in data or '${proposed_name}.tmp' in data else '')" 2>/dev/null)
+            fi
+            if [[ -n "${collision_check}" ]]; then
+                _msg_error "Name collision: container '${collision_check}' already exists"
+                _msg_detail "Choose a different basename with -n, use --force to replace, or remove the existing container"
+                return 1
+            fi
+        else
+            # Force mode: remove any existing container with this name
+            local existing_container
+            existing_container=$(_docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^${proposed_name}$" --filter "name=^${proposed_name}.tmp$" --format '{{.Names}}' 2>/dev/null | head -1)
+            if [[ -n "${existing_container}" ]]; then
+                _msg_info "Force mode: removing existing container '${existing_container}'..."
+                _docker_exec "${FDEVC_DOCKER}" rm -f "${existing_container}" >/dev/null 2>&1
+                _remove_config "${existing_container}"
+            fi
         fi
         
         container_name="${proposed_name}"
@@ -721,6 +770,11 @@ _fdevc_start() {
             remove_on_exit=false
         fi
 
+        # Copy local script if --no-v is used and startup command references a local file
+        if [[ "${no_volume}" == true && -n "${startup_cmd_session}" ]]; then
+            startup_cmd_session=$(_copy_local_script_to_container "${container_name}" "${docker_cmd}" "${startup_cmd_session}")
+        fi
+
         local attach_message="Attaching (stop on exit)..."
         if [[ "${detach}" == true ]]; then
             attach_message="Attaching (persist on exit)..."
@@ -769,6 +823,11 @@ _fdevc_start() {
             if [[ -n "${created_at_current_post}" ]]; then
                 _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "${created_at_current_post}" "${persist_to_save}"
             fi
+        fi
+
+        # Copy local script if --no-v is used and startup command references a local file
+        if [[ "${no_volume}" == true && -n "${startup_cmd_session}" ]]; then
+            startup_cmd_session=$(_copy_local_script_to_container "${container_name}" "${docker_cmd}" "${startup_cmd_session}")
         fi
 
         local post_create_message="Created, attaching (stop on exit)..."
@@ -936,6 +995,88 @@ _fdevc_custom() {
     _msg_detail "This file will be used by default for containers in this directory"
 }
 
+_fdevc_gen() {
+    local project_name=""
+    
+    # Parse arguments
+    if [[ $# -eq 0 ]]; then
+        _msg_error "Usage: fdevc gen <name>"
+        _msg_detail "Creates a fdevc runnable project"
+        return 1
+    fi
+    
+    project_name="$1"
+    
+    # Validate project name
+    if [[ "${project_name}" =~ [[:space:]] ]]; then
+        _msg_error "Project name cannot contain spaces"
+        return 1
+    fi
+    
+    # Check if project already exists
+    if [[ -e "${project_name}" ]]; then
+        _msg_error "'${project_name}' already exists"
+        return 1
+    fi
+    
+    # Check if templates directory exists
+    local templates_dir="${SCRIPT_DIR}/templates"
+    if [[ ! -d "${templates_dir}" ]]; then
+        _msg_error "Templates directory not found at: ${templates_dir}"
+        return 1
+    fi
+    
+    # Verify all required templates exist
+    local required_templates=("runnable.sh" "launch.sh" "install_and_run" "README.md")
+    for template in "${required_templates[@]}"; do
+        if [[ ! -f "${templates_dir}/${template}" ]]; then
+            _msg_error "Missing template: ${template}"
+            return 1
+        fi
+    done
+    
+    _msg_info "Creating fdevc runnable project: ${project_name}"
+    
+    # Create project folder
+    mkdir -p "${project_name}" || { _msg_error "Failed to create project"; return 1; }
+    cd "${project_name}" || { _msg_error "Failed to enter project"; return 1; }
+    
+    _msg_success "Created project: ${project_name}"
+    
+    # Copy and process templates
+    _msg_info "Creating runnable.sh..."
+    cp "${templates_dir}/runnable.sh" "./runnable.sh" || { _msg_error "Failed to create runnable.sh"; return 1; }
+    chmod +x "./runnable.sh"
+    _msg_success "Created runnable.sh"
+    
+    _msg_info "Creating launch.sh..."
+    sed "s/__PROJECT__/${project_name}/g" "${templates_dir}/launch.sh" > "./launch.sh" || { _msg_error "Failed to create launch.sh"; return 1; }
+    chmod +x "./launch.sh"
+    _msg_success "Created launch.sh"
+    
+    _msg_info "Creating install_and_run script..."
+    sed "s/__PROJECT__/${project_name}/g" "${templates_dir}/install_and_run" > "./install_and_run" || { _msg_error "Failed to create install_and_run"; return 1; }
+    chmod +x "./install_and_run"
+    _msg_success "Created install_and_run"
+    
+    _msg_info "Creating README.md..."
+    sed -e "s/__PROJECT__/${project_name}/g" \
+        "${templates_dir}/README.md" > "./README.md" || { _msg_error "Failed to create README.md"; return 1; }
+    _msg_success "Created README.md"
+    
+    echo ""
+    _msg_success "Runnable project created successfully!"
+    echo -e "${_c_bold}${_c_cyan}📁 Current Location: ${_c_reset}${PWD}"
+    echo ""
+    echo -e "${_c_bold}${_c_cyan}Next steps:${_c_reset}"
+    echo -e "  ${_c_bold}1.${_c_reset} ${_c_yellow}Replace ${_c_bold}__USER__${_c_reset}${_c_yellow} with your GitHub username${_c_reset} (see README.md)"
+    echo -e "  ${_c_bold}2.${_c_reset} Edit ${_c_bold}runnable.sh${_c_reset} to add your setup commands"
+    echo -e "  ${_c_bold}3.${_c_reset} Edit ${_c_bold}launch.sh${_c_reset} to configure container settings"
+    echo -e "  ${_c_bold}4.${_c_reset} Optional: Run ${_c_bold}fdevc custom${_c_reset} to create a custom Dockerfile"
+    echo -e "  ${_c_bold}5.${_c_reset} Test locally: ${_c_bold}./launch.sh${_c_reset}"
+    echo -e "  ${_c_bold}6.${_c_reset} Push to GitHub and share: ${_c_dim}curl -fsSL https://raw.githubusercontent.com/<user>/${project_name}/main/install_and_run | bash${_c_reset}"
+}
+
 _fdevc_help() {
     cat "${HELP_FILE}"
 }
@@ -1019,6 +1160,10 @@ fdevc() {
         custom)
             shift
             _fdevc_custom "$@"
+            ;;
+        gen)
+            shift
+            _fdevc_gen "$@"
             ;;
         config)
             shift

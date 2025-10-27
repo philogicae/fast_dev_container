@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -e
+
+# Colors and styling
+RESET="\033[0m"
+BOLD="\033[1m"
+DIM="\033[2m"
+CYAN="\033[96m"
+GREEN="\033[92m"
+RED="\033[91m"
+YELLOW="\033[93m"
+
+# Icons
+ICON_ARROW="→"
+ICON_CHECK="✓"
+ICON_CROSS="✗"
+ICON_ROCKET="🚀"
+
+log_step() {
+    echo -e "${BOLD}${CYAN}${ICON_ARROW} $1${RESET}"
+}
+
+log_success() {
+    echo -e "${BOLD}${GREEN}${ICON_CHECK} $1${RESET}"
+}
+
+log_error() {
+    echo -e "${BOLD}${RED}${ICON_CROSS} $1${RESET}" >&2
+}
+
+log_warning() {
+    echo -e "${BOLD}${YELLOW}⚠ $1${RESET}"
+}
+
+log_detail() {
+    echo -e "  ${DIM}$1${RESET}"
+}
+
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+check_fdevc() {
+    log_step "Checking for fdevc..."
+    if command_exists fdevc; then
+        log_success "fdevc is already installed"
+        return 0
+    else
+        log_warning "fdevc not found"
+        return 1
+    fi
+}
+
+install_fdevc() {
+    log_step "Installing fdevc..."
+    if curl -fsSL https://raw.githubusercontent.com/philogicae/fast_dev_container/main/install | bash; then
+        log_success "fdevc installed successfully"
+    else
+        log_error "Failed to install fdevc"
+        exit 1
+    fi
+    # Try to source fdevc in the current shell
+    if [ -f "$HOME/.fdevc/fdevc.sh" ]; then
+        # shellcheck disable=SC1090
+        source "$HOME/.fdevc/fdevc.sh" 2>/dev/null || true
+    fi
+    # Verify installation
+    if ! command_exists fdevc; then
+        log_error "fdevc installation failed - command not available"
+        log_detail "You may need to restart your shell or run:"
+        log_detail "  source ~/.bashrc  # or ~/.zshrc"
+        exit 1
+    fi
+}
+
+clone_repo() {
+    local repo_url="https://github.com/__USER__/__PROJECT__.git"
+    local project_name="__PROJECT__"
+    log_step "Cloning repository..."
+    if [ -d "$project_name" ]; then
+        log_warning "Project '$project_name' already exists, entering it..."
+        cd "$project_name" || {
+            log_error "Failed to enter project"
+            exit 1
+        }
+    else
+        if git clone "$repo_url" "$project_name"; then
+            log_success "Repository cloned"
+            cd "$project_name" || {
+                log_error "Failed to enter project"
+                exit 1
+            }
+        else
+            log_error "Failed to clone repository"
+            exit 1
+        fi
+    fi
+}
+
+run_launch_script() {
+    log_step "Running launch script..."
+    if [ ! -f "./launch.sh" ]; then
+        log_error "launch.sh not found in current directory"
+        exit 1
+    fi
+    chmod +x ./launch.sh
+    ./launch.sh
+}
+
+main() {
+    # Check if fdevc is installed, install if not
+    if ! check_fdevc; then
+        install_fdevc
+    fi
+    clone_repo
+    run_launch_script
+}
+
+main

@@ -1,5 +1,4 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 set -e
 
 GITHUB_REPO="philogicae/fast_dev_container"
@@ -123,40 +122,50 @@ check_dependencies() {
     log_success "All dependencies satisfied"
 }
 
-detect_shell_config() {
-    local shell_config=""
-    local shell_name="unknown"
+detect_shell_configs() {
+    local configs=()
 
-    # Prefer explicit shell variables when available
-    if [[ -n "${ZSH_VERSION}" ]] || [[ "${SHELL}" == *"zsh"* ]]; then
-        shell_name="zsh"
-        shell_config="${HOME}/.zshrc"
-    elif [[ -n "${BASH_VERSION}" ]] || [[ "${SHELL}" == *"bash"* ]]; then
-        shell_name="bash"
-        if [[ -f "${HOME}/.bashrc" ]]; then
-            shell_config="${HOME}/.bashrc"
-        elif [[ -f "${HOME}/.bash_profile" ]]; then
-            shell_config="${HOME}/.bash_profile"
+    add_config() {
+        local path="$1"
+        local shell_name="$2"
+
+        for existing in "${configs[@]}"; do
+            if [[ "${existing}" == "${path}" ]]; then
+                return
+            fi
+        done
+
+        configs+=("${path}")
+
+        if [[ -e "${path}" ]]; then
+            log_success "Detected ${shell_name} shell" >&2
+            log_detail "Config: ${path}" >&2
         else
-            shell_config="${HOME}/.bashrc"
+            log_success "Detected ${shell_name} shell" >&2
+            log_detail "Config: ${path} (will be created)" >&2
+        fi
+    }
+
+    # zsh detection
+    if [[ -n "${ZSH_VERSION}" ]] || [[ "${SHELL}" == *"zsh"* ]] || command_exists zsh || [[ -f "${HOME}/.zshrc" ]]; then
+        add_config "${HOME}/.zshrc" "zsh"
+    fi
+
+    # bash detection
+    if [[ -n "${BASH_VERSION}" ]] || [[ "${SHELL}" == *"bash"* ]] || command_exists bash || [[ -f "${HOME}/.bashrc" ]] || [[ -f "${HOME}/.bash_profile" ]]; then
+        add_config "${HOME}/.bashrc" "bash"
+        if [[ -f "${HOME}/.bash_profile" ]]; then
+            add_config "${HOME}/.bash_profile" "bash"
         fi
     fi
 
-    if [[ -z "${shell_config}" ]]; then
-        log_warning "Could not detect shell configuration file" >&2
-        log_detail "Expected: ~/.bashrc or ~/.zshrc" >&2
+    if (( ${#configs[@]} == 0 )); then
+        log_warning "Could not detect any shell configuration files" >&2
+        log_detail "Expected: ~/.bashrc, ~/.bash_profile, or ~/.zshrc" >&2
         return
     fi
 
-    if [[ -e "${shell_config}" ]]; then
-        log_success "Detected ${shell_name} shell" >&2
-        log_detail "Config: ${shell_config}" >&2
-    else
-        log_success "Detected ${shell_name} shell" >&2
-        log_detail "Config: ${shell_config} (will be created)" >&2
-    fi
-
-    echo "${shell_config}"
+    printf '%s\n' "${configs[@]}"
 }
 
 spinner() {
@@ -222,71 +231,73 @@ install_fdevc() {
     log_step "Configuring shell integration..."
     echo ""
     
-    local shell_config=$(detect_shell_config)
-    
-    if [[ -z "${shell_config}" ]]; then
+    mapfile -t shell_configs < <(detect_shell_configs)
+
+    if (( ${#shell_configs[@]} == 0 )); then
         echo ""
         log_warning "Manual setup required"
         echo ""
-        log_detail "Add this line to your shell config (.bashrc or .zshrc):"
+        log_detail "Add these lines to your shell config (.bashrc or .zshrc):"
         echo ""
-        echo -e "    ${BOLD}${GREEN}source ${INSTALL_DIR}/fdevc.sh${RESET}"
+        echo -e "    ${BOLD}${GREEN}export FDEVC=\"$HOME/.fdevc/fdevc.sh\"${RESET}"
+        echo -e "    ${BOLD}${GREEN}source $FDEVC${RESET}"
         echo ""
         exit 0
     fi
 
-    if [[ ! -e "${shell_config}" ]]; then
-        log_step "Preparing shell configuration..."
-        local shell_config_dir
-        shell_config_dir=$(dirname "${shell_config}")
+    for shell_config in "${shell_configs[@]}"; do
+        echo ""
 
-        if [[ ! -d "${shell_config_dir}" ]]; then
-            if mkdir -p "${shell_config_dir}" 2>/dev/null; then
-                log_detail "Created directory: ${shell_config_dir}"
+        if [[ ! -e "${shell_config}" ]]; then
+            log_step "Preparing ${shell_config}..."
+            local shell_config_dir
+            shell_config_dir=$(dirname "${shell_config}")
+
+            if [[ ! -d "${shell_config_dir}" ]]; then
+                if mkdir -p "${shell_config_dir}" 2>/dev/null; then
+                    log_detail "Created directory: ${shell_config_dir}"
+                else
+                    log_error "Unable to create directory ${shell_config_dir}"
+                    log_detail "Create it manually and rerun the installer."
+                    exit 1
+                fi
+            fi
+
+            if touch "${shell_config}" 2>/dev/null; then
+                log_success "Created ${shell_config}"
             else
-                log_error "Unable to create directory ${shell_config_dir}"
-                log_detail "Create it manually and rerun the installer."
+                log_error "Unable to create ${shell_config}"
+                log_detail "Add 'export FDEVC=\"$HOME/.fdevc/fdevc.sh\"; source $FDEVC' to your shell config manually."
                 exit 1
             fi
         fi
 
-        if touch "${shell_config}" 2>/dev/null; then
-            log_success "Created ${shell_config}"
+        if grep -qF 'source $FDEVC' "${shell_config}" 2>/dev/null; then
+            log_highlight "${ICON_CHECK} Already configured: ${shell_config}"
         else
-            log_error "Unable to create ${shell_config}"
-            log_detail "Add 'source ${INSTALL_DIR}/fdevc.sh' to your shell config manually."
-            exit 1
+            log_step "Adding to ${shell_config}..."
+            cat <<'EOF' >> "${shell_config}"
+
+# Fast Dev Container
+export FDEVC="$HOME/.fdevc/fdevc.sh"
+source $FDEVC
+EOF
+            log_success "Added to ${shell_config}"
         fi
-    fi
-    
-    echo ""
-    
-    # Check if already sourced
-    local source_line="source ${INSTALL_DIR}/fdevc.sh"
-    if grep -q "source.*fdevc.sh" "${shell_config}" 2>/dev/null; then
-        log_highlight "${ICON_CHECK} Already configured in shell"
-        log_detail "Source line exists in ${shell_config}"
-    else
-        log_step "Adding to shell configuration..."
-        {
-            echo ""
-            echo "# Fast Dev Container"
-            echo "${source_line}"
-        } >> "${shell_config}"
-        log_success "Added to ${shell_config}"
-    fi
-    
+    done
+
     echo
 
     # Step 4: Load commands when possible
     if [[ -t 0 ]]; then
         log_step "Loading fdevc for this session..."
         # shellcheck disable=SC1090
-        if source "${INSTALL_DIR}/fdevc.sh" 2>/dev/null; then
+        export FDEVC="${INSTALL_DIR}/fdevc.sh"
+        if source "${FDEVC}" 2>/dev/null; then
             log_success "fdevc command is ready"
         else
             log_warning "Could not auto-load fdevc"
-            log_detail "Run: source ${INSTALL_DIR}/fdevc.sh"
+            log_detail "Run: export FDEVC=\"$HOME/.fdevc/fdevc.sh\"; source $FDEVC"
         fi
     fi
 
@@ -304,7 +315,8 @@ install_fdevc() {
     echo -e "${DIM}If commands are missing, run:${RESET}"
     echo -e "  ${BOLD}${GREEN}source ${shell_config}${RESET}"
     echo -e "${DIM}Or load directly with:${RESET}"
-    echo -e "  ${BOLD}${GREEN}source ${INSTALL_DIR}/fdevc.sh${RESET}"
+    echo -e "  ${BOLD}${GREEN}export FDEVC=\"$HOME/.fdevc/fdevc.sh\"${RESET}"
+    echo -e "  ${BOLD}${GREEN}source $FDEVC${RESET}"
 
     echo -e "${DIM}Documentation: ${BLUE}https://github.com/${GITHUB_REPO}${RESET}"
 }

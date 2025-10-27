@@ -110,6 +110,23 @@ fdevc custom
     Copy the template Dockerfile to current directory as fdevc.Dockerfile
     This local Dockerfile will be used by default for containers in this directory.
 
+fdevc gen <name>
+    Create a fdevc runnable project.
+    
+    Arguments:
+        name          Name of the project to create
+    
+    Creates a project folder with:
+        runnable.sh      Script that runs inside the container
+        launch.sh        Helper to launch container with predefined settings
+        install_and_run  Installation script for easy deployment
+        README.md        Documentation with TODO section
+    
+    Use case: Share portable container configs via git repositories.
+    After replacing __USER__ with your GitHub username and customizing files,
+    users can install with:
+    curl -fsSL https://raw.githubusercontent.com/<user>/<project>/main/install_and_run | bash
+
 fdevc -h, fdevc --help
     Display this help message.
 
