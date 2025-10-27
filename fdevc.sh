@@ -2,7 +2,7 @@
 : "${FDEVC_DOCKER:=docker}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
 : "${FDEVC_IMAGE:=${SCRIPT_DIR}/Dockerfile}"
-CONFIG_FILE="${SCRIPT_DIR}/.dev_config.json"
+CONFIG_FILE="${SCRIPT_DIR}/.fdevc_config.json"
 UTILS_PY="${SCRIPT_DIR}/utils.py"
 HELP_FILE="${SCRIPT_DIR}/help.txt"
 
@@ -93,11 +93,6 @@ _container_exists() {
 }
 _container_running() {
     _docker_exec "${2:-${FDEVC_DOCKER}}" ps --filter "name=^$1$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^$1$"
-}
-_container_image_id() {
-    local image_id
-    image_id=$(_docker_exec "${2:-${FDEVC_DOCKER}}" inspect --format '{{.Image}}' "$1" 2>/dev/null || true)
-    echo "${image_id}"
 }
 
 _container_image_name() {
@@ -285,7 +280,7 @@ _absolute_path() {
 _build_from_dockerfile() {
     local dockerfile="$1" docker_cmd="${2:-${FDEVC_DOCKER}}" container_name="${3:-fdevc.custom}"
     if [[ ! -f "${dockerfile}" ]]; then
-        echo "✗ Dockerfile not found: ${dockerfile}" >&2
+        _msg_error "Dockerfile not found: ${dockerfile}"
         return 1
     fi
     # Cross-platform hash computation (Linux uses md5sum, macOS uses md5)
@@ -300,19 +295,19 @@ _build_from_dockerfile() {
     local image_name="${container_name}:${dockerfile_hash:0:8}"
     local dockerfile_dir="$(dirname "${dockerfile}")"
     if _docker_exec "${docker_cmd}" images -q "${image_name}" 2>/dev/null | grep -q .; then
-        echo "→ Using cached image: ${image_name}" >&2
+        _msg_info "Using cached image: ${image_name}" >&2
         echo "${image_name}"
         return 0
     fi
-    echo "→ Building image from Dockerfile: ${dockerfile}" >&2
-    echo "  Image tag: ${image_name}" >&2
-    echo "  Building..." >&2
+    _msg_info "Building image from Dockerfile: ${dockerfile}" >&2
+    _msg_detail "Image tag: ${image_name}" >&2
+    _msg_detail "Building..." >&2
     if _docker_exec "${docker_cmd}" build -t "${image_name}" -f "${dockerfile}" "${dockerfile_dir}"; then
-        echo "✓ Image built successfully: ${image_name}" >&2
+        _msg_success "Image built: ${image_name}" >&2
         echo "${image_name}"
         return 0
     else
-        echo "✗ Failed to build image from Dockerfile" >&2
+        _msg_error "Failed to build image from Dockerfile"
         return 1
     fi
 }
@@ -411,6 +406,7 @@ _fdevc_start() {
     local no_volume=false no_socket=false force_new=false force_recreate=false vm_mode=false
     local startup_cmd_once="" startup_cmd_save="" startup_cmd_save_flag=false ignore_startup_cmd=false
     local detach_user_set=false
+    local copy_config_from="" custom_basename=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -428,6 +424,8 @@ _fdevc_start() {
             -f|--force) force_recreate=true; shift ;;
             --new) force_new=true; shift ;;
             --vm) vm_mode=true; no_volume=true; no_socket=true; shift ;;
+            --cp) copy_config_from="$2"; shift 2 ;;
+            -n) custom_basename="$2"; shift 2 ;;
             *) 
                 if [[ "${force_new}" == true ]] || [[ "${vm_mode}" == true ]]; then
                     _msg_error "Unknown argument: $1"
@@ -450,6 +448,23 @@ _fdevc_start() {
         startup_cmd_save_flag=false
     fi
 
+    # Resolve --cp (copy config from) if provided
+    local copy_config_source=""
+    if [[ -n "${copy_config_from}" ]]; then
+        copy_config_source="$(_resolve_container_name "${copy_config_from}")"
+        if [[ -z "${copy_config_source}" ]]; then
+            _msg_error "Config source not found: ${copy_config_from}. Run 'fdevc ls'."
+            return 1
+        fi
+        # Verify config exists
+        local source_config=$(_load_config "${copy_config_source}")
+        if [[ -z "${source_config}" || "${source_config}" == "{}" ]]; then
+            _msg_error "No config found for: ${copy_config_source}"
+            return 1
+        fi
+        _msg_info "Copying config from: ${copy_config_source}"
+    fi
+
     local overrides_supplied=false
     [[ -n "${ports_override}" || -n "${image_override}" || -n "${docker_cmd_override}" ]] && overrides_supplied=true
     local container_running=false
@@ -459,7 +474,42 @@ _fdevc_start() {
     # Determine container name based on mode
     local container_name
     local config_target_name
-    if [[ "${vm_mode}" == true ]]; then
+    local is_vm_copy=false
+    
+    # Check if copying from a VM container to preserve VM mode
+    if [[ -n "${copy_config_from}" ]]; then
+        local source_name="$(_resolve_container_name "${copy_config_from}")"
+        if [[ "${source_name}" == fdevc.vm.* ]]; then
+            is_vm_copy=true
+        fi
+    fi
+    
+    if [[ -n "${custom_basename}" ]]; then
+        # Custom basename provided with -n
+        # Determine the final container name first
+        local proposed_name
+        if [[ "${vm_mode}" == true ]] || [[ "${is_vm_copy}" == true ]]; then
+            proposed_name="fdevc.vm.${custom_basename}"
+        else
+            proposed_name="fdevc.${custom_basename}"
+        fi
+        
+        # Check for name collision (exact match or with .tmp suffix)
+        local collision_check
+        collision_check=$(_docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^${proposed_name}$" --filter "name=^${proposed_name}.tmp$" --format '{{.Names}}' 2>/dev/null | head -1)
+        if [[ -z "${collision_check}" && -f "${CONFIG_FILE}" ]]; then
+            # Also check saved configs
+            collision_check=$(${FDEVC_PYTHON} -c "import json; data = json.load(open('${CONFIG_FILE}')); print('${proposed_name}' if '${proposed_name}' in data or '${proposed_name}.tmp' in data else '')" 2>/dev/null)
+        fi
+        if [[ -n "${collision_check}" ]]; then
+            _msg_error "Name collision: container '${collision_check}' already exists"
+            _msg_detail "Choose a different basename with -n or remove the existing container"
+            return 1
+        fi
+        
+        container_name="${proposed_name}"
+        config_target_name="${container_name}"
+    elif [[ "${vm_mode}" == true ]]; then
         # VM mode: generate special name fdevc.vm.<random-name>
         container_name="fdevc.vm.$(_generate_project_label)"
         config_target_name="${container_name}"
@@ -476,8 +526,8 @@ _fdevc_start() {
         config_target_name="${container_name}"
     fi
 
-    # Prefer base configuration when available (unless tmp requested)
-    if [[ "${force_new}" != true && "${remove_on_exit}" != true ]]; then
+    # Prefer base configuration when available (unless tmp requested or --cp used)
+    if [[ "${force_new}" != true && "${remove_on_exit}" != true && -z "${copy_config_source}" ]]; then
         local base_config_name="${config_target_name}"
         base_config_name="${base_config_name%.tmp}"
         if [[ "${base_config_name}" != "${config_target_name}" ]]; then
@@ -496,16 +546,29 @@ _fdevc_start() {
     local socket_override_arg=""
     [[ "${no_socket}" == true ]] && socket_override_arg="false"
 
-    # Merge config with overrides
+    # Merge config with overrides (use copy source if --cp provided)
     local merge_project_path=""
-    if [[ "${vm_mode}" == true ]]; then
-        # VM mode: explicitly set no project path (sentinel value)
+    if [[ "${vm_mode}" == true ]] || [[ "${is_vm_copy}" == true ]]; then
+        # VM mode or copying from VM: explicitly set no project path (sentinel value)
         merge_project_path="__NO_PROJECT__"
+        # For VM copy, ensure socket is disabled unless explicitly set
+        if [[ "${is_vm_copy}" == true && "${no_socket}" != true && -z "${socket_override_arg}" ]]; then
+            no_socket=true
+            socket_override_arg="false"
+        fi
     elif [[ "${force_new}" == true ]]; then
         # New mode: use current directory
         merge_project_path="$PWD"
+    elif [[ -n "${copy_config_source}" ]]; then
+        # When copying config, check if source has no project_path (e.g., VM container)
+        # If so, preserve that state instead of defaulting to PWD
+        local source_project=$(_get_config "${copy_config_source}" "project_path")
+        if [[ -z "${source_project}" ]]; then
+            merge_project_path="__NO_PROJECT__"
+        fi
     fi
-    IFS='|' read -r ports image_config docker_cmd project_path startup_cmd_config socket_config config_present persist_mode_config <<< "$(_merge_config "${config_target_name}" "${ports_override}" "${image_override}" "${docker_cmd_override}" "${merge_project_path}" "${socket_override_arg}")"
+    local config_source="${copy_config_source:-${config_target_name}}"
+    IFS='|' read -r ports image_config docker_cmd project_path startup_cmd_config socket_config config_present persist_mode_config <<< "$(_merge_config "${config_source}" "${ports_override}" "${image_override}" "${docker_cmd_override}" "${merge_project_path}" "${socket_override_arg}")"
     local startup_cmd_session="${startup_cmd_once:-${startup_cmd_config}}"
     local run_on_reattach=false
     [[ -n "${startup_cmd_once}" ]] && run_on_reattach=true
@@ -677,7 +740,7 @@ _fdevc_start() {
 
         local run_args=(-d --name "${container_name}")
         local socket_label="false"
-        if [[ "${no_volume}" != true ]]; then
+        if [[ "${no_volume}" != true && -n "${project_path}" ]]; then
             run_args+=(-v "${project_path}:/workspace")
         fi
         if [[ "${no_socket}" != true ]]; then

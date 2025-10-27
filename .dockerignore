@@ -4,7 +4,7 @@
 .gitattributes
 
 # Dev container config
-.dev_config.json
+.fdevc_config.json
 fdevc.sh
 utils.py
 help.txt

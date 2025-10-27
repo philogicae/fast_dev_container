@@ -1,4 +1,4 @@
-.dev_config.json
+.fdevc_config.json
 fdevc.Dockerfile
 *.pyc
 __pycache__/

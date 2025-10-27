@@ -20,6 +20,7 @@ COLOR_PINK = "\033[38;5;213m"
 COLOR_ORANGE = "\033[38;5;208m"
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+TIMESTAMP_FRACTION_RE = re.compile(r"(\.\d+)(?=(?:Z|[+-]\d{2}:?\d{2})?$)")
 
 
 def visible_length(text):
@@ -97,7 +98,19 @@ def format_created_timestamp(raw):
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
 
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def normalize_iso_timestamp(value):
+    """Trim sub-second precision from ISO-like timestamps."""
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    return TIMESTAMP_FRACTION_RE.sub("", text, count=1)
 
 
 def build_mode_indicators(name, persist=False):
@@ -321,11 +334,13 @@ def save_config(
         else:
             cfg.pop("socket", None)
 
+    created_at = normalize_iso_timestamp(created_at)
+
     if created_at:
         cfg["created_at"] = created_at
     else:
         if not cfg.get("created_at"):
-            cfg["created_at"] = (
+            cfg["created_at"] = normalize_iso_timestamp(
                 datetime.now(timezone.utc)
                 .replace(microsecond=0)
                 .isoformat()
@@ -594,8 +609,18 @@ def resolve_index(config_file, index_str):
 def list_configs(config_file):
     """Display all saved configurations in a table (reuses list_containers logic)."""
     if not os.path.exists(config_file):
-        print(f"{COLOR_DIM}No configurations saved{COLOR_RESET}")
-        return
+        config_dir = os.path.dirname(config_file)
+        try:
+            if config_dir:
+                os.makedirs(config_dir, exist_ok=True)
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump({}, f, indent=2, sort_keys=True)
+        except OSError as exc:
+            print(
+                f"{COLOR_RED}✗ Failed to initialize config file ({exc}){COLOR_RESET}",
+                file=sys.stderr,
+            )
+            return
 
     try:
         with open(config_file, "r", encoding="utf-8") as f:
@@ -659,13 +684,13 @@ def list_configs(config_file):
         rows.append((str(idx), name, created_display, config_lines))
 
     # Calculate widths
+    config_header = collapse_home_path(config_file) if config_file else "CONFIGURATIONS"
+
     idx_width = max(len("#"), max(len(row[0]) for row in rows))
-    name_width = max(
-        NAME_MIN_WIDTH, len("SAVED CONFIGURATIONS"), max(len(row[1]) for row in rows)
-    )
+    name_width = max(NAME_MIN_WIDTH, len(config_header), max(len(row[1]) for row in rows))
     created_width = max(len("CREATED"), max(len(row[2]) for row in rows))
 
-    header_prefix = f"{'#':<{idx_width}}  {'SAVED CONFIGURATIONS':<{name_width}}  "
+    header_prefix = f"{'#':<{idx_width}}  {config_header:<{name_width}}  "
     header_created = "CREATED".rjust(created_width)
     header_text = header_prefix + header_created
 
