@@ -426,7 +426,12 @@ _fdevc_start() {
             --vm) vm_mode=true; no_volume=true; no_socket=true; shift ;;
             --cp) copy_config_from="$2"; shift 2 ;;
             -n) custom_basename="$2"; shift 2 ;;
+            --) shift; break ;;
             *) 
+                if [[ "$1" == -* ]]; then
+                    _msg_error "Unknown option: $1"
+                    return 1
+                fi
                 if [[ "${force_new}" == true ]] || [[ "${vm_mode}" == true ]]; then
                     _msg_error "Unknown argument: $1"
                     return 1
