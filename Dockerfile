@@ -1,66 +1,240 @@
 # Development Container Template
-# Based on Debian 13 with Python 3.13, Node.js 24 + Yarn + Pnpm, Rust + Cargo, Docker + Docker Compose
+# Based on Astral UV with Python 3.13 on Debian Trixie Slim
+# Includes: Python (UV), Node.js, Deno, Go, Rust, Docker CLI, and comprehensive dev tools
 
-FROM python:3.13-slim-trixie
+FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
+    # Node.js
     NODE_VERSION=24 \
+    # Rust
     RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH
+    # Go (LTS version)
+    GOPATH=/go \
+    GOBIN=/go/bin \
+    GO_VERSION=1.24.9 \
+    # Deno
+    DENO_INSTALL=/usr/local \
+    # PATH
+    PATH=/usr/local/go/bin:/usr/local/cargo/bin:/go/bin:/usr/local/bin:$PATH \
+    # Python optimizations (UV is already optimized)
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    # UV configuration
+    UV_SYSTEM_PYTHON=1 \
+    UV_COMPILE_BYTECODE=1 \
+    # Git safe directory
+    GIT_DISCOVERY_ACROSS_FILESYSTEM=1 \
+    # Locale
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
-# Install system dependencies and tools
-RUN apt-get update && apt-get install -y \
+# Install system dependencies, Node.js, Docker CLI, and libssl1.1 in a single layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build essentials
     build-essential \
     cmake \
     pkg-config \
-    # Crypto libraries for OpenSSL builds
+    make \
+    autoconf \
+    automake \
+    libtool \
+    # Crypto and compression libraries
     libssl-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libffi-dev \
+    liblzma-dev \
     # Version control
     git \
+    git-lfs \
     # Network tools
     curl \
     wget \
+    netcat-openbsd \
     # Text editors
     vim \
     nano \
-    # Terminal multiplexer
+    # Terminal tools
     tmux \
-    # Utils (for Node.js setup)
+    # Shell utilities
+    bash-completion \
+    # File utilities
+    zip \
+    unzip \
+    file \
+    # Process and system tools
+    procps \
+    htop \
+    tree \
+    psmisc \
+    lsof \
+    strace \
+    less \
+    # JSON/YAML tools
+    jq \
+    # SSH client
+    openssh-client \
+    # Utils for Node.js and Docker setup
     ca-certificates \
     gnupg \
     lsb-release \
-    # Clean up
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
-    && apt-get install -y nodejs \
-    && npm install -g npm@latest \
-    && npm install -g yarn pnpm \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Rust latest stable
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable \
-    && chmod -R a+w $RUSTUP_HOME $CARGO_HOME
-
-# Install Docker and Docker Compose
-RUN apt-get update && apt-get install -y apt-transport-https \
+    apt-transport-https \
+    # Add Node.js repository
+    && curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
+    # Install Node.js
+    && apt-get install -y --no-install-recommends nodejs \
+    # Setup Docker repository
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
     && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    # Add Bullseye repo for libssl1.1
+    && echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list.d/bullseye.list \
     && apt-get update \
-    && apt-get install -y docker-ce-cli docker-compose-plugin \
-    && rm -rf /var/lib/apt/lists/*
+    # Install Docker CLI and libssl1.1
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin libssl1.1 \
+    # Cleanup
+    && rm /etc/apt/sources.list.d/bullseye.list \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Install Python dev tools using UV (much faster than pip)
+RUN uv pip install --system --no-cache \
+    # Package managers (UV is already included)
+    pip-tools \
+    poetry \
+    # Code quality and formatting
+    ruff \
+    black \
+    isort \
+    # Type checking and linting
+    mypy \
+    pylint \
+    # Testing
+    pytest \
+    pytest-cov \
+    pytest-asyncio \
+    # Interactive and notebooks
+    ipython \
+    jupyterlab \
+    # Web frameworks
+    fastapi \
+    uvicorn[standard] \
+    # Data validation
+    pydantic \
+    pydantic-settings \
+    # HTTP clients
+    httpx \
+    aiohttp \
+    requests \
+    # CLI building
+    typer \
+    click \
+    # Environment variables
+    python-dotenv \
+    # Terminal UI
+    rich
+
+# Install Node.js package managers and common tools
+RUN npm install -g --loglevel=error \
+    npm@latest \
+    yarn \
+    pnpm \
+    # TypeScript ecosystem
+    typescript \
+    ts-node \
+    tsx \
+    # Development tools
+    nodemon \
+    pm2 \
+    concurrently \
+    dotenv-cli \
+    # Code quality
+    eslint \
+    prettier \
+    # Build tools
+    vite \
+    turbo \
+    # Testing
+    vitest \
+    # Utilities
+    rimraf \
+    && npm cache clean --force
+
+# Install Go (separate layer for independent caching)
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz \
+    && mkdir -p ${GOPATH}/src ${GOPATH}/bin \
+    && chmod -R 777 ${GOPATH} \
+    # Verify installation
+    && /usr/local/go/bin/go version
+
+# Install Deno (latest version, separate layer)
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s \
+    && chmod +x /usr/local/bin/deno \
+    # Verify installation
+    && deno --version
+
+# Install Rust with essential components
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    --default-toolchain stable \
+    --profile minimal \
+    --component rustfmt,clippy,rust-analyzer \
+    && chmod -R a+w $RUSTUP_HOME $CARGO_HOME \
+    # Install common Cargo tools
+    && cargo install cargo-watch cargo-edit --locked \
+    && rm -rf $CARGO_HOME/registry
 
 # Install fdevc (Fast Dev Container CLI)
 RUN curl -fsSL https://raw.githubusercontent.com/philogicae/fast_dev_container/main/install | bash
 
+# Configure git for better UX
+RUN git config --global init.defaultBranch main \
+    && git config --global core.editor nano \
+    && git config --global pull.rebase false \
+    && git config --global safe.directory '*' \
+    && git config --global user.name "Dev Container" \
+    && git config --global user.email "dev@container.local" \
+    && git config --global color.ui auto
+
 # Set working directory
 WORKDIR /workspace
+
+# Add healthcheck
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD uv --version && node --version && deno --version && go version && rustc --version || exit 1
+
+# Generate and save build information to file (compressed format)
+RUN { \
+    printf "\n\033[1;36m═══ ENVIRONMENT INFO ═══\033[0m\n"; \
+    printf "\033[0;90m🐧 $(cat /etc/os-release | grep PRETTY_NAME | cut -d'=' -f2 | tr -d '\"')\033[0m\n"; \
+    printf "\033[1;33m🐍 Python\033[0m \033[0;36m$(python --version 2>&1 | awk '{print $2}')\033[0m • \033[1;35mUV\033[0m \033[0;36m$(uv --version 2>&1 | awk '{print $2}')\033[0m • \033[1;35mPoetry\033[0m \033[0;36m$(poetry --version 2>&1 | awk '{print $NF}' | tr -d ')')\033[0m\n"; \
+    printf "\033[1;32m🟢 Node\033[0m \033[0;36m$(node --version)\033[0m • \033[1;32mnpm\033[0m \033[0;36m$(npm --version)\033[0m • \033[1;32mpnpm\033[0m \033[0;36m$(pnpm --version)\033[0m • \033[1;32myarn\033[0m \033[0;36m$(yarn --version)\033[0m\n"; \
+    printf "\033[1;36m🦕 Deno\033[0m \033[0;36m$(deno --version | head -n1 | awk '{print $2}')\033[0m\n"; \
+    printf "\033[1;34m🐹 Go\033[0m \033[0;36m$(go version | awk '{print $3}' | sed 's/go//')\033[0m\n"; \
+    printf "\033[1;31m🦀 Rust\033[0m \033[0;36m$(rustc --version | awk '{print $2}')\033[0m • \033[1;31mCargo\033[0m \033[0;36m$(cargo --version | awk '{print $2}')\033[0m\n"; \
+    printf "\033[1;34m🐳 Docker\033[0m \033[0;36m$(docker --version | awk '{print $3}' | tr -d ',')\033[0m • \033[1;34mCompose\033[0m \033[0;36m$(docker compose version --short)\033[0m\n"; \
+    printf "\033[0;90m🔧 Git\033[0m \033[0;36m$(git --version | awk '{print $3}')\033[0m • \033[0;90mCMake\033[0m \033[0;36m$(cmake --version | head -n1 | awk '{print $3}')\033[0m • \033[0;90mMake\033[0m \033[0;36m$(make --version | head -n1 | awk '{print $3}')\033[0m\n"; \
+    printf "\033[1;32m✅ Ready for development!\033[0m\n\n"; \
+    } | tee /etc/container-info.txt
+
+# Create startup script to display info
+RUN echo '#!/bin/bash' > /usr/local/bin/show-info && \
+    echo 'cat /etc/container-info.txt' >> /usr/local/bin/show-info && \
+    chmod +x /usr/local/bin/show-info
+
+# Add to .bashrc to display on new terminal sessions (only once per session)
+RUN echo '' >> /root/.bashrc && \
+    echo '# Display container info on login (once per session)' >> /root/.bashrc && \
+    echo 'if [ -f /etc/container-info.txt ] && [ -z "$CONTAINER_INFO_SHOWN" ]; then' >> /root/.bashrc && \
+    echo '    cat /etc/container-info.txt' >> /root/.bashrc && \
+    echo '    export CONTAINER_INFO_SHOWN=1' >> /root/.bashrc && \
+    echo 'fi' >> /root/.bashrc
 
 # Keep container running
 CMD ["tail", "-f", "/dev/null"]
