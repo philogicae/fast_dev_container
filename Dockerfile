@@ -29,7 +29,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     GIT_DISCOVERY_ACROSS_FILESYSTEM=1 \
     # Locale
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    # Docker configuration for nested containers (Docker-in-Docker)
+    DOCKER_HOST=unix:///var/run/docker.sock
 
 # Install system dependencies, Node.js, Docker CLI, and libssl1.1 in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -88,16 +90,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     # Install Node.js
     && apt-get install -y --no-install-recommends nodejs \
-    # Setup Docker repository
+    # Setup Docker repository (official Debian method)
+    # Reference: https://docs.docker.com/engine/install/debian/#installation-methods
     && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
-    && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
-    # Add Bullseye repo for libssl1.1
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    # Install Docker CLI 
+    && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
+    # Add Bullseye repo and install legacy libssl1.1
     && echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list.d/bullseye.list \
     && apt-get update \
-    # Install Docker CLI and libssl1.1
-    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin libssl1.1 \
+    && apt-get install -y libssl1.1 \
     # Cleanup
     && rm /etc/apt/sources.list.d/bullseye.list \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -220,6 +224,7 @@ RUN { \
     printf "\033[1;31m🦀 Rust\033[0m \033[0;36m$(rustc --version | awk '{print $2}')\033[0m • \033[1;31mCargo\033[0m \033[0;36m$(cargo --version | awk '{print $2}')\033[0m\n"; \
     printf "\033[1;34m🐳 Docker\033[0m \033[0;36m$(docker --version | awk '{print $3}' | tr -d ',')\033[0m • \033[1;34mCompose\033[0m \033[0;36m$(docker compose version --short)\033[0m\n"; \
     printf "\033[0;90m🔧 Git\033[0m \033[0;36m$(git --version | awk '{print $3}')\033[0m • \033[0;90mCMake\033[0m \033[0;36m$(cmake --version | head -n1 | awk '{print $3}')\033[0m • \033[0;90mMake\033[0m \033[0;36m$(make --version | head -n1 | awk '{print $3}')\033[0m\n"; \
+    printf "\033[1;35m📦 fdevc\033[0m \033[0;36m$(command -v fdevc >/dev/null 2>&1 && echo 'installed' || echo 'not found')\033[0m\n"; \
     printf "\033[1;32m✅ Ready for development!\033[0m\n\n"; \
     } | tee /etc/container-info.txt
 

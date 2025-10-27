@@ -266,6 +266,49 @@ _build_attach_command() {
     echo "${cmd}"
 }
 
+_attach_session() {
+    local container_name="$1"
+    local docker_cmd="$2"
+    local startup_cmd="$3"
+    local persist="$4"
+    local run_on_reattach="$5"
+    local detach="$6"
+    local has_tty="$7"
+    shift 7
+    local attach_msg_stop="$1"; shift
+    local attach_msg_persist="$1"; shift
+    local noninteractive_run_msg="$1"; shift
+    local noninteractive_skip_msg="$1"; shift
+    local noninteractive_run_level="${1:-warning}"
+
+    if [[ "${has_tty}" == true ]]; then
+        local attach_message="${attach_msg_stop}"
+        if [[ "${detach}" == true ]]; then
+            attach_message="${attach_msg_persist}"
+        fi
+        _msg_success "${attach_message}"
+        local attach_cmd
+        attach_cmd=$(_build_attach_command "${startup_cmd}" "${persist}" "${run_on_reattach}")
+        local docker_exec_args=(exec -i -t -w /workspace "${container_name}" bash -lc "${attach_cmd}")
+        _docker_exec "${docker_cmd}" "${docker_exec_args[@]}"
+        return $?
+    fi
+
+    if [[ -n "${startup_cmd}" ]]; then
+        if [[ "${noninteractive_run_level}" == "success" ]]; then
+            _msg_success "${noninteractive_run_msg}"
+        else
+            _msg_warning "${noninteractive_run_msg}"
+        fi
+        local noninteractive_cmd="cd /workspace; ${startup_cmd}"
+        _docker_exec "${docker_cmd}" exec -i -w /workspace "${container_name}" bash -lc "${noninteractive_cmd}"
+        return $?
+    fi
+
+    _msg_warning "${noninteractive_skip_msg}"
+    return 0
+}
+
 _save_config() {
     local container_name="$1"
     local ports="$2"
@@ -445,6 +488,10 @@ _fdevc_start() {
     local startup_cmd_once="" startup_cmd_save="" startup_cmd_save_flag=false ignore_startup_cmd=false
     local detach_user_set=false
     local copy_config_from="" custom_basename=""
+    local has_tty=true
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        has_tty=false
+    fi
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -775,14 +822,13 @@ _fdevc_start() {
             startup_cmd_session=$(_copy_local_script_to_container "${container_name}" "${docker_cmd}" "${startup_cmd_session}")
         fi
 
-        local attach_message="Attaching (stop on exit)..."
-        if [[ "${detach}" == true ]]; then
-            attach_message="Attaching (persist on exit)..."
-        fi
-        _msg_success "${attach_message}"
-        local attach_cmd
-        attach_cmd=$(_build_attach_command "${startup_cmd_session}" "${persist_to_save}" "${run_on_reattach}")
-        _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${attach_cmd}"
+        _attach_session "${container_name}" "${docker_cmd}" "${startup_cmd_session}" \
+            "${persist_to_save}" "${run_on_reattach}" "${detach}" "${has_tty}" \
+            "Attaching (stop on exit)..." \
+            "Attaching (persist on exit)..." \
+            "No TTY detected; running startup command without interactive shell." \
+            "No TTY detected and no startup command configured; skipping interactive attach." \
+            warning
         exec_status=$?
     else
         if [[ "${remove_on_exit}" != true ]]; then
@@ -830,14 +876,13 @@ _fdevc_start() {
             startup_cmd_session=$(_copy_local_script_to_container "${container_name}" "${docker_cmd}" "${startup_cmd_session}")
         fi
 
-        local post_create_message="Created, attaching (stop on exit)..."
-        if [[ "${detach}" == true ]]; then
-            post_create_message="Created; attaching (persist on exit)..."
-        fi
-        _msg_success "${post_create_message}"
-        local attach_cmd
-        attach_cmd=$(_build_attach_command "${startup_cmd_session}" "${persist_to_save}" "${run_on_reattach}")
-        _docker_exec "${docker_cmd}" exec -it -w /workspace "${container_name}" bash -lc "${attach_cmd}"
+        _attach_session "${container_name}" "${docker_cmd}" "${startup_cmd_session}" \
+            "${persist_to_save}" "${run_on_reattach}" "${detach}" "${has_tty}" \
+            "Created, attaching (stop on exit)..." \
+            "Created; attaching (persist on exit)..." \
+            "Created; running startup command without interactive shell..." \
+            "Created container but no TTY detected; skip attach (no startup command)." \
+            success
         exec_status=$?
 
         if [[ -n "${image_to_remove_after_create}" ]]; then
