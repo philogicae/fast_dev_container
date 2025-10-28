@@ -173,14 +173,8 @@ RUN if [ "${NODE_INSTALL}" != "false" ]; then \
 
 # Install Deno (conditional)
 RUN if [ "${DENO_INSTALL}" != "false" ]; then \
-    DENO_VER="${DENO_VERSION}"; \
-    if [ "${DENO_INSTALL}" != "true" ]; then DENO_VER="${DENO_INSTALL}"; fi; \
-    if [ "${DENO_VER}" = "latest" ]; then \
-    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s; \
-    else \
-    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s "v${DENO_VER}"; \
-    fi \
-    && chmod +x /usr/local/bin/deno \
+    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s \
+    && chmod +x /usr/local/bin/deno; \
     fi
 
 # Install Go (conditional)
@@ -208,7 +202,7 @@ RUN if [ "${RUST_INSTALL}" != "false" ]; then \
     fi
 
 # Install fdevc (Fast Dev Container CLI)
-RUN curl -fsSL https://raw.githubusercontent.com/philogicae/fast_dev_container/main/install | bash
+RUN curl -fsSL https://raw.githubusercontent.com/philogicae/fast_dev_container/main/install | bash || true
 
 # Configure git for better UX
 RUN git config --global init.defaultBranch main \
@@ -234,7 +228,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Generate and save build information to file (only installed tools shown)
 RUN { \
     printf "\n\033[1;36m═══ ENVIRONMENT INFO ═══\033[0m\n"; \
-    printf "\033[0;90m🐧 $(cat /etc/os-release | grep PRETTY_NAME | cut -d'=' -f2 | tr -d '\"')\033[0m\n"; \
+    printf "\033[0;90m🐧 $(grep PRETTY_NAME /etc/os-release | cut -d'=' -f2 | tr -d '\"')\033[0m\n"; \
     printf "\033[1;33m🐍 Python\033[0m \033[0;36m$(python --version 2>&1 | awk '{print $2}')\033[0m • \033[1;35mUV\033[0m \033[0;36m$(uv --version 2>&1 | awk '{print $2}')\033[0m • \033[1;35mPoetry\033[0m \033[0;36m$(poetry --version 2>&1 | awk '{print $NF}' | tr -d ')')\033[0m\n"; \
     if [ "${NODE_INSTALL}" != "false" ]; then \
     printf "\033[1;32m🟢 Node\033[0m \033[0;36m$(node --version)\033[0m • \033[1;32mnpm\033[0m \033[0;36m$(npm --version)\033[0m • \033[1;32mpnpm\033[0m \033[0;36m$(pnpm --version)\033[0m • \033[1;32myarn\033[0m \033[0;36m$(yarn --version)\033[0m\n"; \

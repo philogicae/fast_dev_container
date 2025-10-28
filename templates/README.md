@@ -9,7 +9,7 @@ One-liner to install & run a `fdevc runnable project` for __PROJECT__ powered by
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/__USER__/__PROJECT__)
 
-## Installation
+## Quick Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/__USER__/__PROJECT__/main/install_and_run | bash
@@ -23,10 +23,11 @@ curl -fsSL https://raw.githubusercontent.com/__USER__/__PROJECT__/main/install_a
 - **`launch.sh`** - Helper script to launch a container using `fdevc` with predefined settings. Edit the configuration variables at the top to customize ports, image, persistence, etc.
 - **`runnable.sh`** - The main script that runs inside the container.
 
-# TODO & REMOVE
+# TODO & REMOVE (for runnable project creators)
 
 1. **Replace** `__USER__` with your GitHub username in all files.
 2. **Edit** `runnable.sh` to add your setup commands, install tools, or run applications.
 3. **Edit** `launch.sh` to change container configuration (ports, image, persistence mode, etc.).
 4. **Edit** `README.md` to match your project's needs and remove this section.
 5. **Optional:** Run `fdevc custom` to create a custom ./fdevc.Dockerfile that you can edit and commit for more advanced configurations.
+6. **Optional:** Add an `## Usage` section to explain how to use the project.
