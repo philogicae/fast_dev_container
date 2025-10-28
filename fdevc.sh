@@ -206,15 +206,16 @@ _copy_local_script_to_container() {
             { _msg_info "Copying local script to container..."; } >&2
             { _msg_detail "Source: ${source_file}"; } >&2
             _docker_exec "${docker_cmd}" exec "${container_name}" mkdir -p /workspace >/dev/null 2>&1
-            if _docker_exec "${docker_cmd}" exec "${container_name}" chmod +x "/workspace/$(basename "${source_file}")" >/dev/null 2>&1; then
-                { _msg_success "Script copied to /workspace/$(basename "${source_file}")"; } >&2
+            local basename_script
+            basename_script="$(basename "${source_file}")"
+            if _docker_exec "${docker_cmd}" cp "${source_file}" "${container_name}:/workspace/${basename_script}" >/dev/null 2>&1 \
+                && _docker_exec "${docker_cmd}" exec "${container_name}" chmod +x "/workspace/${basename_script}" >/dev/null 2>&1; then
+                { _msg_success "Script copied to /workspace/${basename_script}"; } >&2
                 # Update startup command to use the copied script
-                local basename_script
-                basename_script="$(basename "${source_file}")"
                 echo "${startup_cmd/${script_path}/./${basename_script}}"
                 return 0
             else
-                _msg_error "Failed to copy script to container"
+                { _msg_error "Failed to copy script to container"; } >&2
             fi
         fi
     fi

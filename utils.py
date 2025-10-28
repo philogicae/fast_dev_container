@@ -39,14 +39,11 @@ def collapse_home_path(path: str) -> str:
     """Replace a leading HOME directory with ~ for display."""
     if not path:
         return path
-    home = os.path.expanduser("~")
     try:
-        expanded = os.path.expanduser(path)
-        absolute = os.path.abspath(expanded)
+        home_norm = os.path.normpath(os.path.expanduser("~"))
+        absolute_norm = os.path.normpath(os.path.abspath(os.path.expanduser(path)))
     except (TypeError, ValueError, OSError):
         return path
-    home_norm = os.path.normpath(home)
-    absolute_norm = os.path.normpath(absolute)
     if absolute_norm == home_norm:
         return "~"
     prefix = home_norm + os.sep
@@ -83,13 +80,11 @@ def format_created_timestamp(raw: str) -> str:
             dt = None
 
     # Additional fallback stripping timezone information
-    if dt is None:
+    if dt is None and len(text) >= 19:
         for layout in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
             try:
-                # Ensure text is long enough before slicing
-                if len(text) >= 19:
-                    dt = datetime.strptime(text[:19], layout)
-                    break
+                dt = datetime.strptime(text[:19], layout)
+                break
             except ValueError:
                 continue
 

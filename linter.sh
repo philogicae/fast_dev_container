@@ -140,6 +140,10 @@ SHELLCHECK_FILES=(
 
 log "Shell Formatting..."
 for script in "${SHFMT_FILES[@]}"; do
+	if [[ ! -f "${script}" ]]; then
+		log_warn "File not found: ${script}"
+		continue
+	fi
 	if ! shfmt -w "${script}"; then
 		log_warn "shfmt skipped ${script} (unsupported syntax)"
 	fi
@@ -147,12 +151,20 @@ done
 
 log "Shell Linting..."
 for script in "${SHELLCHECK_FILES[@]}"; do
+	if [[ ! -f "${script}" ]]; then
+		log_warn "File not found: ${script}"
+		continue
+	fi
 	shellcheck "${script}"
 done
 
-log "Python Formatting..."
-"${PYTHON_BIN}" -m ruff format utils.py
+if [[ -f "utils.py" ]]; then
+	log "Python Formatting..."
+	"${PYTHON_BIN}" -m ruff format utils.py
 
-log "Python Linting..."
-"${PYTHON_BIN}" -m ruff check utils.py --fix
-"${PYTHON_BIN}" -m mypy utils.py --strict
+	log "Python Linting..."
+	"${PYTHON_BIN}" -m ruff check utils.py --fix
+	"${PYTHON_BIN}" -m mypy utils.py --strict
+else
+	log_warn "utils.py not found, skipping Python linting"
+fi

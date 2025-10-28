@@ -198,7 +198,10 @@ install_fdevc() {
 		echo ""
 		log_step "Updating to latest version..."
 
-		cd "${INSTALL_DIR}"
+		cd "${INSTALL_DIR}" || {
+			log_error "Failed to access ${INSTALL_DIR}"
+			exit 1
+		}
 		if git pull origin main --quiet 2>&1; then
 			local latest_commit
 			latest_commit=$(git log -1 --pretty=format:'%h - %s' 2>/dev/null || echo "unknown")

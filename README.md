@@ -1,8 +1,8 @@
 ![Fast Dev Container](banner.png)
 
-Lightweight CLI for fast & repeatable dev environments.
+Lightweight CLI to manage fast & repeatable `dev environments` and `runnable projects`
 
-Create or attach a container for the current directory. Stops on exit unless using persistent mode (-d).
+Create and manage vm-like dev containers for any directory in seconds.
 
 [![Curl](https://img.shields.io/badge/curl-required-orange)](https://curl.se/)
 [![Git](https://img.shields.io/badge/git-required-orange)](https://git-scm.com/)

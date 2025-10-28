@@ -1,6 +1,6 @@
 # __PROJECT__
 
-fdevc runnable project for __PROJECT__ powered by [fdevc](https://github.com/philogicae/fast_dev_container).
+One-liner to install & run a `fdevc runnable project` for __PROJECT__ powered by [fdevc](https://github.com/philogicae/fast_dev_container)
 
 [![Curl](https://img.shields.io/badge/curl-required-orange)](https://curl.se/)
 [![Git](https://img.shields.io/badge/git-required-orange)](https://git-scm.com/)
@@ -15,7 +15,7 @@ fdevc runnable project for __PROJECT__ powered by [fdevc](https://github.com/phi
 curl -fsSL https://raw.githubusercontent.com/__USER__/__PROJECT__/main/install_and_run | bash
 ```
 
-> If not already present, it will automatically install [fdevc](https://github.com/philogicae/fast_dev_container).
+> If not already present, it will automatically install [fdevc](https://github.com/philogicae/fast_dev_container)
 
 ## Structure
 

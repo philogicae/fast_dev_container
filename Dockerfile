@@ -173,12 +173,14 @@ RUN if [ "${NODE_INSTALL}" != "false" ]; then \
 
 # Install Deno (conditional)
 RUN if [ "${DENO_INSTALL}" != "false" ]; then \
-    if [ "${DENO_INSTALL}" = "true" ] || [ "${DENO_INSTALL}" = "latest" ]; then \
+    DENO_VER="${DENO_VERSION}"; \
+    if [ "${DENO_INSTALL}" != "true" ]; then DENO_VER="${DENO_INSTALL}"; fi; \
+    if [ "${DENO_VER}" = "latest" ]; then \
     curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s; \
     else \
-    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s "v${DENO_INSTALL}"; \
+    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s "v${DENO_VER}"; \
     fi \
-    && chmod +x /usr/local/bin/deno; \
+    && chmod +x /usr/local/bin/deno \
     fi
 
 # Install Go (conditional)
