@@ -1,6 +1,6 @@
 # Development Container Template
 # Based on Astral UV with Python 3.13 on Debian Trixie Slim
-# Includes: Python (UV), Node.js, Deno, Go, Rust, Docker CLI, and comprehensive dev tools
+# Includes: Python (UV), Node.js, Deno, Go, Rust, Docker, and comprehensive dev tools
 
 FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim
 
@@ -33,7 +33,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     # Docker configuration for nested containers (Docker-in-Docker)
     DOCKER_HOST=unix:///var/run/docker.sock
 
-# Install system dependencies, Node.js, Docker CLI, and libssl1.1 in a single layer
+# Install system dependencies, Node.js, Docker, and libssl1.1 in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build essentials
     build-essential \
@@ -95,8 +95,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
-    # Install Docker CLI 
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
+    # Install Docker packages 
     && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
     # Add Bullseye repo and install legacy libssl1.1
     && echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list.d/bullseye.list \
@@ -224,8 +225,7 @@ RUN { \
     printf "\033[1;31m🦀 Rust\033[0m \033[0;36m$(rustc --version | awk '{print $2}')\033[0m • \033[1;31mCargo\033[0m \033[0;36m$(cargo --version | awk '{print $2}')\033[0m\n"; \
     printf "\033[1;34m🐳 Docker\033[0m \033[0;36m$(docker --version | awk '{print $3}' | tr -d ',')\033[0m • \033[1;34mCompose\033[0m \033[0;36m$(docker compose version --short)\033[0m\n"; \
     printf "\033[0;90m🔧 Git\033[0m \033[0;36m$(git --version | awk '{print $3}')\033[0m • \033[0;90mCMake\033[0m \033[0;36m$(cmake --version | head -n1 | awk '{print $3}')\033[0m • \033[0;90mMake\033[0m \033[0;36m$(make --version | head -n1 | awk '{print $3}')\033[0m\n"; \
-    printf "\033[1;35m📦 fdevc\033[0m \033[0;36m$(command -v fdevc >/dev/null 2>&1 && echo 'installed' || echo 'not found')\033[0m\n"; \
-    printf "\033[1;32m✅ Ready for development!\033[0m\n\n"; \
+    printf "\033[1;35m📦 fdevc\033[0m \033[1;32m✅ Ready for development!\033[0m\n\n"; \
     } | tee /etc/container-info.txt
 
 # Create startup script to display info

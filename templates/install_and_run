@@ -46,7 +46,6 @@ check_fdevc() {
         log_success "fdevc is already installed"
         return 0
     fi
-    log_warning "fdevc not found"
     local fallback_script="$HOME/.fdevc/fdevc.sh"
     if [ -f "${fallback_script}" ]; then
         log_detail "Sourcing ${fallback_script}..."
@@ -56,10 +55,10 @@ check_fdevc() {
             log_success "fdevc loaded from ${fallback_script}"
             return 0
         fi
-        log_warning "fdevc still unavailable after sourcing"
     else
         log_detail "No fallback script found at ${fallback_script}"
     fi
+    log_warning "fdevc not found"
     return 1
 }
 
