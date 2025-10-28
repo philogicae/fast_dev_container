@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main]
 
+# Allow write permissions for GitHub Actions cache
+permissions:
+  contents: read
+  packages: write
+  actions: write
+
 jobs:
   lint-bash:
     name: Lint Shell Scripts 🐚
@@ -78,8 +84,8 @@ jobs:
           docker buildx build \
             --tag fdevc:latest \
             --load \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
+            --cache-from type=gha,scope=fdevc-build \
+            --cache-to type=gha,scope=fdevc-build,mode=max \
             .
 
       - name: Test image
@@ -127,5 +133,5 @@ jobs:
             ${{ vars.DOCKER_USERNAME }}/fdevc:latest
             ${{ vars.DOCKER_USERNAME }}/fdevc:${{ steps.version.outputs.VERSION }}
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=fdevc-build
+          cache-to: type=gha,scope=fdevc-build,mode=max
