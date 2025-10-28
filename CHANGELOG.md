@@ -11,6 +11,7 @@
 - Rename config file and improve container naming
 - Add project generation and improve script handling
 - Enhance Docker setup and improve non-TTY support
+- Improve Docker setup and fdevc error handling
 
 ### 🐛 Bug Fixes
 
@@ -21,3 +22,4 @@
 
 - Update changelog with VM and container management features
 - Update changelog with new container features
+- Update changelog with container and script improvements
