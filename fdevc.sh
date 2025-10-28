@@ -362,9 +362,19 @@ _is_dockerfile() { [[ -f "$1" ]] && return 0; return 1; }
 _absolute_path() {
     local path="$1"
     if [[ "${path}" == /* ]]; then
-        echo "${path}"
+        printf '%s\n' "${path}"
+        return
+    fi
+
+    local dir="${path%/*}"
+    [[ "${dir}" == "${path}" ]] && dir=.
+
+    if cd "${dir}" 2>/dev/null; then
+        local resolved_dir
+        resolved_dir="$(pwd)"
+        printf '%s/%s\n' "${resolved_dir}" "${path##*/}"
     else
-        echo "$(cd "$(dirname "${path}")" 2>/dev/null && pwd)/$(basename "${path}")"
+        printf '%s\n' "${path}"
     fi
 }
 
