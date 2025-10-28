@@ -20,305 +20,307 @@ MAGENTA="\033[95m"
 ICON_ARROW="→"
 ICON_CHECK="✓"
 ICON_CROSS="✗"
-ICON_STAR="★"
 ICON_ROCKET="🚀"
 ICON_PACKAGE="📦"
-ICON_WRENCH="🔧"
 ICON_SPARKLES="✨"
 
 log_step() {
-    echo -e "${BOLD}${CYAN}${ICON_ARROW} $1${RESET}"
+	echo -e "${BOLD}${CYAN}${ICON_ARROW} $1${RESET}"
 }
 
 log_success() {
-    echo -e "${BOLD}${GREEN}${ICON_CHECK} $1${RESET}"
+	echo -e "${BOLD}${GREEN}${ICON_CHECK} $1${RESET}"
 }
 
 log_error() {
-    echo -e "${BOLD}${RED}${ICON_CROSS} $1${RESET}" >&2
+	echo -e "${BOLD}${RED}${ICON_CROSS} $1${RESET}" >&2
 }
 
 log_warning() {
-    echo -e "${BOLD}${YELLOW}⚠ $1${RESET}"
+	echo -e "${BOLD}${YELLOW}⚠ $1${RESET}"
 }
 
 log_detail() {
-    echo -e "  ${DIM}$1${RESET}"
+	echo -e "  ${DIM}$1${RESET}"
 }
 
 log_highlight() {
-    echo -e "${BOLD}${BLUE}$1${RESET}"
+	echo -e "${BOLD}${BLUE}$1${RESET}"
 }
 
 command_exists() {
-    command -v "$1" >/dev/null 2>&1
+	command -v "$1" >/dev/null 2>&1
 }
 
 print_banner() {
-    echo -e "${BOLD}${CYAN}"
-    cat << 'EOF'
+	echo -e "${BOLD}${CYAN}"
+	cat <<'EOF'
     ______           __     ____               ______            __        _                
    / ____/___ ______/ /_   / __ \___ _   __   / ____/___  ____  / /_____ _(_)___  ___  _____
   / /_  / __ `/ ___/ __/  / / / / _ \ | / /  / /   / __ \/ __ \/ __/ __ `/ / __ \/ _ \/ ___/
  / __/ / /_/ (__  ) /_   / /_/ /  __/ |/ /  / /___/ /_/ / / / / /_/ /_/ / / / / /  __/ /    
 /_/    \__,_/____/\__/  /_____/\___/|___/   \____/\____/_/ /_/\__/\__,_/_/_/ /_/\___/_/      
 EOF
-    echo -e "${RESET}"
-    echo -e "${BOLD}${MAGENTA}                    Lightweight Container Dev Environments${RESET}"
-    echo ""
+	echo -e "${RESET}"
+	echo -e "${BOLD}${MAGENTA}                    Lightweight Container Dev Environments${RESET}"
+	echo ""
 }
 
 check_dependency() {
-    local cmd="$1"
-    local name="$2"
-    local version_flag="${3:---version}"
-    
-    if command_exists "$cmd"; then
-        local version=$(${cmd} ${version_flag} 2>&1 | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1 || echo "unknown")
-        log_success "${name} found ${DIM}(v${version})${RESET}"
-        return 0
-    else
-        log_error "${name} not found"
-        return 1
-    fi
+	local cmd="$1"
+	local name="$2"
+	local version_flag="${3:---version}"
+
+	if command_exists "$cmd"; then
+		local version
+		version=$(${cmd} "${version_flag}" 2>&1 | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1 || echo "unknown")
+		log_success "${name} found ${DIM}(v${version})${RESET}"
+		return 0
+	else
+		log_error "${name} not found"
+		return 1
+	fi
 }
 
 check_dependencies() {
-    log_step "Checking dependencies..."
-    echo ""
-    
-    local all_ok=true
-    
-    if ! check_dependency git "Git"; then
-        all_ok=false
-        log_detail "Install: https://git-scm.com/install"
-    fi
-    
-    if ! check_dependency python3 "Python 3" "--version"; then
-        all_ok=false
-        log_detail "Install: https://python.org/downloads"
-    fi
-    
-    # Check for container runtime
-    if command_exists docker; then
-        check_dependency docker "Docker" "--version"
-    elif command_exists podman; then
-        check_dependency podman "Podman" "--version"
-    else
-        log_error "Docker or Podman not found"
-        log_detail "Install Docker: https://docs.docker.com/get-docker/"
-        log_detail "Or Podman: https://podman.io/getting-started/installation"
-        all_ok=false
-    fi
-    
-    echo ""
-    
-    if [[ "${all_ok}" == false ]]; then
-        log_error "Missing required dependencies"
-        log_detail "Please install them before continuing."
-        exit 1
-    fi
-    
-    log_success "All dependencies satisfied"
+	log_step "Checking dependencies..."
+	echo ""
+
+	local all_ok=true
+
+	if ! check_dependency git "Git"; then
+		all_ok=false
+		log_detail "Install: https://git-scm.com/install"
+	fi
+
+	if ! check_dependency python3 "Python 3" "--version"; then
+		all_ok=false
+		log_detail "Install: https://python.org/downloads"
+	fi
+
+	# Check for container runtime
+	if command_exists docker; then
+		check_dependency docker "Docker" "--version"
+	elif command_exists podman; then
+		check_dependency podman "Podman" "--version"
+	else
+		log_error "Docker or Podman not found"
+		log_detail "Install Docker: https://docs.docker.com/get-docker/"
+		log_detail "Or Podman: https://podman.io/getting-started/installation"
+		all_ok=false
+	fi
+
+	echo ""
+
+	if [[ "${all_ok}" == false ]]; then
+		log_error "Missing required dependencies"
+		log_detail "Please install them before continuing."
+		exit 1
+	fi
+
+	log_success "All dependencies satisfied"
 }
 
 detect_shell_configs() {
-    local configs=()
+	local configs=()
 
-    add_config() {
-        local path="$1"
-        local shell_name="$2"
+	add_config() {
+		local path="$1"
+		local shell_name="$2"
 
-        for existing in "${configs[@]}"; do
-            if [[ "${existing}" == "${path}" ]]; then
-                return
-            fi
-        done
+		for existing in "${configs[@]}"; do
+			if [[ "${existing}" == "${path}" ]]; then
+				return
+			fi
+		done
 
-        configs+=("${path}")
+		configs+=("${path}")
 
-        if [[ -e "${path}" ]]; then
-            log_success "Detected ${shell_name} shell" >&2
-            log_detail "Config: ${path}" >&2
-        else
-            log_success "Detected ${shell_name} shell" >&2
-            log_detail "Config: ${path} (will be created)" >&2
-        fi
-    }
+		if [[ -e "${path}" ]]; then
+			log_success "Detected ${shell_name} shell" >&2
+			log_detail "Config: ${path}" >&2
+		else
+			log_success "Detected ${shell_name} shell" >&2
+			log_detail "Config: ${path} (will be created)" >&2
+		fi
+	}
 
-    # zsh detection
-    if [[ -n "${ZSH_VERSION}" ]] || [[ "${SHELL}" == *"zsh"* ]] || command_exists zsh || [[ -f "${HOME}/.zshrc" ]]; then
-        add_config "${HOME}/.zshrc" "zsh"
-    fi
+	# zsh detection
+	if [[ -n "${ZSH_VERSION}" ]] || [[ "${SHELL}" == *"zsh"* ]] || command_exists zsh || [[ -f "${HOME}/.zshrc" ]]; then
+		add_config "${HOME}/.zshrc" "zsh"
+	fi
 
-    # bash detection
-    if [[ -n "${BASH_VERSION}" ]] || [[ "${SHELL}" == *"bash"* ]] || command_exists bash || [[ -f "${HOME}/.bashrc" ]] || [[ -f "${HOME}/.bash_profile" ]]; then
-        add_config "${HOME}/.bashrc" "bash"
-        if [[ -f "${HOME}/.bash_profile" ]]; then
-            add_config "${HOME}/.bash_profile" "bash"
-        fi
-    fi
+	# bash detection
+	if [[ -n "${BASH_VERSION}" ]] || [[ "${SHELL}" == *"bash"* ]] || command_exists bash || [[ -f "${HOME}/.bashrc" ]] || [[ -f "${HOME}/.bash_profile" ]]; then
+		add_config "${HOME}/.bashrc" "bash"
+		if [[ -f "${HOME}/.bash_profile" ]]; then
+			add_config "${HOME}/.bash_profile" "bash"
+		fi
+	fi
 
-    if (( ${#configs[@]} == 0 )); then
-        log_warning "Could not detect any shell configuration files" >&2
-        log_detail "Expected: ~/.bashrc, ~/.bash_profile, or ~/.zshrc" >&2
-        return
-    fi
+	if ((${#configs[@]} == 0)); then
+		log_warning "Could not detect any shell configuration files" >&2
+		log_detail "Expected: ~/.bashrc, ~/.bash_profile, or ~/.zshrc" >&2
+		return
+	fi
 
-    printf '%s\n' "${configs[@]}"
+	printf '%s\n' "${configs[@]}"
 }
 
 spinner() {
-    local pid=$1
-    local delay=0.1
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    while ps -p "$pid" > /dev/null 2>&1; do
-        local temp=${spinstr#?}
-        printf " [%c]  " "$spinstr"
-        spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b\b\b\b"
-    done
-    printf "    \b\b\b\b"
+	local pid=$1
+	local delay=0.1
+	local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+	while ps -p "$pid" >/dev/null 2>&1; do
+		local temp=${spinstr#?}
+		printf " [%c]  " "$spinstr"
+		spinstr=$temp${spinstr%"$temp"}
+		sleep $delay
+		printf "\b\b\b\b\b\b"
+	done
+	printf "    \b\b\b\b"
 }
 
 install_fdevc() {
-    print_banner
-    
-    # Step 1: Check dependencies
-    check_dependencies
-    echo ""
-    
-    # Step 2: Install or update
-    log_step "Installing Fast Dev Container..."
-    echo ""
-    
-    if [[ -d "${INSTALL_DIR}" ]]; then
-        log_highlight "${ICON_PACKAGE} Existing installation detected"
-        log_detail "Location: ${INSTALL_DIR}"
-        echo ""
-        log_step "Updating to latest version..."
-        
-        cd "${INSTALL_DIR}"
-        if git pull origin main --quiet 2>&1; then
-            local latest_commit=$(git log -1 --pretty=format:'%h - %s' 2>/dev/null || echo "unknown")
-            log_success "Repository updated"
-            log_detail "Latest: ${latest_commit}"
-        else
-            log_error "Failed to update repository"
-            log_warning "Try removing ${INSTALL_DIR} and reinstalling"
-            log_detail "Command: rm -rf ${INSTALL_DIR}"
-            exit 1
-        fi
-    else
-        log_highlight "${ICON_PACKAGE} Installing to ${INSTALL_DIR}"
-        echo ""
-        
-        if git clone --quiet "${REPO_URL}" "${INSTALL_DIR}" 2>&1; then
-            log_success "Repository cloned successfully"
-            local file_count=$(find "${INSTALL_DIR}" -type f | wc -l)
-            log_detail "Files installed: ${file_count}"
-        else
-            log_error "Failed to clone repository"
-            log_detail "Repository: ${REPO_URL}"
-            exit 1
-        fi
-    fi
-    
-    echo ""
-    
-    # Step 3: Configure shell
-    log_step "Configuring shell integration..."
-    echo ""
-    
-    mapfile -t shell_configs < <(detect_shell_configs)
+	print_banner
 
-    if (( ${#shell_configs[@]} == 0 )); then
-        echo ""
-        log_warning "Manual setup required"
-        echo ""
-        log_detail "Add these lines to your shell config (.bashrc or .zshrc):"
-        echo ""
-        echo -e "    ${BOLD}${GREEN}export FDEVC=\"$HOME/.fdevc/fdevc.sh\"${RESET}"
-        echo -e "    ${BOLD}${GREEN}source $FDEVC${RESET}"
-        echo ""
-        exit 0
-    fi
+	# Step 1: Check dependencies
+	check_dependencies
+	echo ""
 
-    for shell_config in "${shell_configs[@]}"; do
-        echo ""
+	# Step 2: Install or update
+	log_step "Installing Fast Dev Container..."
+	echo ""
 
-        if [[ ! -e "${shell_config}" ]]; then
-            log_step "Preparing ${shell_config}..."
-            local shell_config_dir
-            shell_config_dir=$(dirname "${shell_config}")
+	if [[ -d "${INSTALL_DIR}" ]]; then
+		log_highlight "${ICON_PACKAGE} Existing installation detected"
+		log_detail "Location: ${INSTALL_DIR}"
+		echo ""
+		log_step "Updating to latest version..."
 
-            if [[ ! -d "${shell_config_dir}" ]]; then
-                if mkdir -p "${shell_config_dir}" 2>/dev/null; then
-                    log_detail "Created directory: ${shell_config_dir}"
-                else
-                    log_error "Unable to create directory ${shell_config_dir}"
-                    log_detail "Create it manually and rerun the installer."
-                    exit 1
-                fi
-            fi
+		cd "${INSTALL_DIR}"
+		if git pull origin main --quiet 2>&1; then
+			local latest_commit
+			latest_commit=$(git log -1 --pretty=format:'%h - %s' 2>/dev/null || echo "unknown")
+			log_success "Repository updated"
+			log_detail "Latest: ${latest_commit}"
+		else
+			log_error "Failed to update repository"
+			log_warning "Try removing ${INSTALL_DIR} and reinstalling"
+			log_detail "Command: rm -rf ${INSTALL_DIR}"
+			exit 1
+		fi
+	else
+		log_highlight "${ICON_PACKAGE} Installing to ${INSTALL_DIR}"
+		echo ""
 
-            if touch "${shell_config}" 2>/dev/null; then
-                log_success "Created ${shell_config}"
-            else
-                log_error "Unable to create ${shell_config}"
-                log_detail "Add 'export FDEVC=\"$HOME/.fdevc/fdevc.sh\"; source $FDEVC' to your shell config manually."
-                exit 1
-            fi
-        fi
+		if git clone --quiet "${REPO_URL}" "${INSTALL_DIR}" 2>&1; then
+			log_success "Repository cloned successfully"
+			local file_count
+			file_count=$(find "${INSTALL_DIR}" -type f | wc -l)
+			log_detail "Files installed: ${file_count}"
+		else
+			log_error "Failed to clone repository"
+			log_detail "Repository: ${REPO_URL}"
+			exit 1
+		fi
+	fi
 
-        if grep -qF 'source $FDEVC' "${shell_config}" 2>/dev/null; then
-            log_highlight "${ICON_CHECK} Already configured: ${shell_config}"
-        else
-            log_step "Adding to ${shell_config}..."
-            cat <<'EOF' >> "${shell_config}"
+	echo ""
+
+	# Step 3: Configure shell
+	log_step "Configuring shell integration..."
+	echo ""
+
+	mapfile -t shell_configs < <(detect_shell_configs)
+
+	if ((${#shell_configs[@]} == 0)); then
+		echo ""
+		log_warning "Manual setup required"
+		echo ""
+		log_detail "Add these lines to your shell config (.bashrc or .zshrc):"
+		echo ""
+		echo -e "    ${BOLD}${GREEN}export FDEVC=\"$HOME/.fdevc/fdevc.sh\"${RESET}"
+		echo -e "    ${BOLD}${GREEN}source $FDEVC${RESET}"
+		echo ""
+		exit 0
+	fi
+
+	for shell_config in "${shell_configs[@]}"; do
+		echo ""
+
+		if [[ ! -e "${shell_config}" ]]; then
+			log_step "Preparing ${shell_config}..."
+			local shell_config_dir
+			shell_config_dir=$(dirname "${shell_config}")
+
+			if [[ ! -d "${shell_config_dir}" ]]; then
+				if mkdir -p "${shell_config_dir}" 2>/dev/null; then
+					log_detail "Created directory: ${shell_config_dir}"
+				else
+					log_error "Unable to create directory ${shell_config_dir}"
+					log_detail "Create it manually and rerun the installer."
+					exit 1
+				fi
+			fi
+
+			if touch "${shell_config}" 2>/dev/null; then
+				log_success "Created ${shell_config}"
+			else
+				log_error "Unable to create ${shell_config}"
+				log_detail "Add 'export FDEVC=\"$HOME/.fdevc/fdevc.sh\"; source $FDEVC' to your shell config manually."
+				exit 1
+			fi
+		fi
+
+		# shellcheck disable=SC2016
+		if grep -qF 'source $FDEVC' "${shell_config}" 2>/dev/null; then
+			log_highlight "${ICON_CHECK} Already configured: ${shell_config}"
+		else
+			log_step "Adding to ${shell_config}..."
+			cat <<'EOF' >>"${shell_config}"
 
 # Fast Dev Container
 export FDEVC="$HOME/.fdevc/fdevc.sh"
 source $FDEVC
 EOF
-            log_success "Added to ${shell_config}"
-        fi
-    done
+			log_success "Added to ${shell_config}"
+		fi
+	done
 
-    echo
+	echo
 
-    # Step 4: Load commands when possible
-    if [[ -t 0 ]]; then
-        log_step "Loading fdevc for this session..."
-        # shellcheck disable=SC1090
-        export FDEVC="${INSTALL_DIR}/fdevc.sh"
-        if source "${FDEVC}" 2>/dev/null; then
-            log_success "fdevc command is ready"
-        else
-            log_warning "Could not auto-load fdevc"
-            log_detail "Run: export FDEVC=\"$HOME/.fdevc/fdevc.sh\"; source $FDEVC"
-        fi
-    fi
+	# Step 4: Load commands when possible
+	if [[ -t 0 ]]; then
+		log_step "Loading fdevc for this session..."
+		export FDEVC="${INSTALL_DIR}/fdevc.sh"
+		# shellcheck disable=SC1090
+		if source "${FDEVC}" 2>/dev/null; then
+			log_success "fdevc command is ready"
+		else
+			log_warning "Could not auto-load fdevc"
+			log_detail "Run: export FDEVC=\"$HOME/.fdevc/fdevc.sh\"; source $FDEVC"
+		fi
+	fi
 
-    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${BOLD}${GREEN}${ICON_SPARKLES}  Installation Complete! ${ICON_SPARKLES}${RESET}"
-    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+	echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+	echo -e "${BOLD}${GREEN}${ICON_SPARKLES}  Installation Complete! ${ICON_SPARKLES}${RESET}"
+	echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
-    echo -e "${BOLD}${CYAN}${ICON_ROCKET} Quick Start:${RESET}"
-    echo -e "  ${BOLD}fdevc${RESET}              ${DIM}# Start/attach to container${RESET}"
-    echo -e "  ${BOLD}fdevc new${RESET}          ${DIM}# Create new timestamped container${RESET}"
-    echo -e "  ${BOLD}fdevc ls${RESET}           ${DIM}# List all containers${RESET}"
-    echo -e "  ${BOLD}fdevc custom${RESET}       ${DIM}# Copy template Dockerfile${RESET}"
-    echo -e "  ${BOLD}fdevc -h${RESET}           ${DIM}# Show full help${RESET}"
+	echo -e "${BOLD}${CYAN}${ICON_ROCKET} Quick Start:${RESET}"
+	echo -e "  ${BOLD}fdevc${RESET}              ${DIM}# Start/attach to container${RESET}"
+	echo -e "  ${BOLD}fdevc new${RESET}          ${DIM}# Create new timestamped container${RESET}"
+	echo -e "  ${BOLD}fdevc ls${RESET}           ${DIM}# List all containers${RESET}"
+	echo -e "  ${BOLD}fdevc custom${RESET}       ${DIM}# Copy template Dockerfile${RESET}"
+	echo -e "  ${BOLD}fdevc -h${RESET}           ${DIM}# Show full help${RESET}"
 
-    echo -e "${DIM}If commands are missing, run:${RESET}"
-    echo -e "  ${BOLD}${GREEN}source ${shell_config}${RESET}"
-    echo -e "${DIM}Or load directly with:${RESET}"
-    echo -e "  ${BOLD}${GREEN}export FDEVC=\"$HOME/.fdevc/fdevc.sh\"${RESET}"
-    echo -e "  ${BOLD}${GREEN}source $FDEVC${RESET}"
+	echo -e "${DIM}If commands are missing, run:${RESET}"
+	echo -e "  ${BOLD}${GREEN}source ${shell_config}${RESET}"
+	echo -e "${DIM}Or load directly with:${RESET}"
+	echo -e "  ${BOLD}${GREEN}export FDEVC=\"$HOME/.fdevc/fdevc.sh\"${RESET}"
+	echo -e "  ${BOLD}${GREEN}source $FDEVC${RESET}"
 
-    echo -e "${DIM}Documentation: ${BLUE}https://github.com/${GITHUB_REPO}${RESET}"
+	echo -e "${DIM}Documentation: ${BLUE}https://github.com/${GITHUB_REPO}${RESET}"
 }
 
 # Run installation

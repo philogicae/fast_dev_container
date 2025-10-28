@@ -2,15 +2,21 @@
 
 : "${FDEVC_PYTHON:=python3}"
 : "${FDEVC_DOCKER:=docker}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
-: "${FDEVC_IMAGE:=${SCRIPT_DIR}/Dockerfile}"
+# shellcheck disable=SC2296
+if [[ -n "${ZSH_VERSION}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+: "${FDEVC_IMAGE:=fdevc:latest}"
 CONFIG_FILE="${SCRIPT_DIR}/.fdevc_config.json"
 UTILS_PY="${SCRIPT_DIR}/utils.py"
 HELP_FILE="${SCRIPT_DIR}/help.txt"
 
 _check_dependencies() {
     local missing=()
-    local docker_base_cmd=$(echo "${FDEVC_DOCKER}" | awk '{print $1}')
+    local docker_base_cmd
+    docker_base_cmd=$(echo "${FDEVC_DOCKER}" | awk '{print $1}')
     if ! command -v "${docker_base_cmd}" &>/dev/null; then missing+=("${docker_base_cmd}"); fi
     if ! command -v "${FDEVC_PYTHON}" &>/dev/null; then missing+=("${FDEVC_PYTHON}"); fi
     if [[ ${#missing[@]} -gt 0 ]]; then
@@ -30,6 +36,7 @@ _check_dependencies() {
     fi
 }
 
+# shellcheck disable=SC2317
 if ! _check_dependencies; then return 1 2>/dev/null || exit 1; fi
 
 # Color and styling helpers
@@ -54,6 +61,7 @@ _icon_saved="◌"
 _msg_info() { echo -e "${_c_bold}${_c_cyan}${_icon_arrow}${_c_reset} ${_c_bold}$*${_c_reset}"; }
 _msg_success() { echo -e "${_c_bold}${_c_green}${_icon_check}${_c_reset} ${_c_green}$*${_c_reset}"; }
 _msg_error() { echo -e "${_c_bold}${_c_red}${_icon_cross}${_c_reset} ${_c_red}$*${_c_reset}" >&2; }
+_msg_warning() { echo -e "${_c_bold}${_c_yellow}⚠${_c_reset} ${_c_yellow}$*${_c_reset}"; }
 _msg_detail() { echo -e "  ${_c_dim}$*${_c_reset}"; }
 _msg_highlight() { echo -e "${_c_bold}${_c_blue}$*${_c_reset}"; }
 _msg_docker_cmd() { echo -e "${_c_magenta}$ $*${_c_reset}"; }
@@ -127,14 +135,16 @@ _load_config() {
 
 _get_config_value() {
     local config="$1" key="$2" default="$3"
-    local value=$(echo "${config}" | ${FDEVC_PYTHON} "${UTILS_PY}" get_config_value "${key}" "${default}" 2>/dev/null)
+    local value
+    value=$(echo "${config}" | ${FDEVC_PYTHON} "${UTILS_PY}" get_config_value "${key}" "${default}" 2>/dev/null)
     echo "${value:-${default}}"
 }
 
 _get_config() {
     local container_name="$1"
     local key="$2"
-    local config=$(_load_config "${container_name}")
+    local config
+    config=$(_load_config "${container_name}")
     _get_config_value "${config}" "${key}"
 }
 
@@ -165,7 +175,8 @@ _handle_port_conflict() {
         if [[ -n "${conflicting_port}" ]]; then
             _msg_detail "Port ${conflicting_port} is already in use"
             # Find which container is using this port
-            local blocking_container=$(_docker_exec "${docker_cmd}" ps -a --format '{{.Names}}|||{{.Ports}}' 2>/dev/null | grep ":${conflicting_port}->" | cut -d'|' -f1 | head -1)
+            local blocking_container
+            blocking_container=$(_docker_exec "${docker_cmd}" ps -a --format '{{.Names}}|||{{.Ports}}' 2>/dev/null | grep ":${conflicting_port}->" | cut -d'|' -f1 | head -1)
             if [[ -n "${blocking_container}" ]]; then
                 echo -e "  ${_c_bold}${_c_yellow}⚠ Blocked by container: ${_c_blue}${blocking_container}${_c_reset}"
                 echo -e "  ${_c_dim}Run: ${_c_reset}${_c_bold}fdevc stop ${blocking_container}${_c_reset}"
@@ -195,13 +206,11 @@ _copy_local_script_to_container() {
             { _msg_info "Copying local script to container..."; } >&2
             { _msg_detail "Source: ${source_file}"; } >&2
             _docker_exec "${docker_cmd}" exec "${container_name}" mkdir -p /workspace >/dev/null 2>&1
-            _docker_exec "${docker_cmd}" cp "${source_file}" "${container_name}:/workspace/$(basename "${source_file}")" >/dev/null 2>&1
-            if [[ $? -eq 0 ]]; then
-                # Make the script executable
-                _docker_exec "${docker_cmd}" exec "${container_name}" chmod +x "/workspace/$(basename "${source_file}")" >/dev/null 2>&1
+            if _docker_exec "${docker_cmd}" exec "${container_name}" chmod +x "/workspace/$(basename "${source_file}")" >/dev/null 2>&1; then
                 { _msg_success "Script copied to /workspace/$(basename "${source_file}")"; } >&2
                 # Update startup command to use the copied script
-                local basename_script="$(basename "${source_file}")"
+                local basename_script
+                basename_script="$(basename "${source_file}")"
                 echo "${startup_cmd/${script_path}/./${basename_script}}"
                 return 0
             else
@@ -374,7 +383,8 @@ _build_from_dockerfile() {
         dockerfile_hash="latest"
     fi
     local image_name="${container_name}:${dockerfile_hash:0:8}"
-    local dockerfile_dir="$(dirname "${dockerfile}")"
+    local dockerfile_dir
+    dockerfile_dir="$(dirname "${dockerfile}")"
     if _docker_exec "${docker_cmd}" images -q "${image_name}" 2>/dev/null | grep -q .; then
         _msg_info "Using cached image: ${image_name}" >&2
         echo "${image_name}"
@@ -408,7 +418,8 @@ _resolve_container_name() {
     if [[ -z "${arg}" ]]; then
         _get_container_name
     elif [[ "${arg}" =~ ^[0-9]+$ ]]; then
-        local name="$(_get_container_by_index "${arg}")"
+        local name
+        name="$(_get_container_by_index "${arg}")"
         [[ -z "${name}" ]] && echo "" || echo "${name}"
     else
         echo "${arg}"
@@ -424,7 +435,8 @@ _merge_config() {
     local socket_override="$6"
     
     # Load config once
-    local config=$(_load_config "${container_name}")
+    local config
+    config=$(_load_config "${container_name}")
     local config_present="false"
     if [[ -n "${config}" && "${config}" != "{}" ]]; then
         config_present="true"
@@ -441,7 +453,8 @@ _merge_config() {
     local image="${image_override:-$(_get_config_value "${config}" "image" "${default_image}")}" 
     local docker_cmd="${docker_cmd_override:-$(_get_config_value "${config}" "docker_cmd" "${FDEVC_DOCKER}")}" 
 
-    local project_from_config="$(_get_config_value "${config}" "project_path" "__DEVCONF_NO_PROJECT__")"
+    local project_from_config
+    project_from_config="$(_get_config_value "${config}" "project_path" "__DEVCONF_NO_PROJECT__")"
     local project_path=""
     if [[ -n "${project_override}" && "${project_override}" != "__NO_PROJECT__" ]]; then
         project_path="${project_override}"
@@ -454,7 +467,8 @@ _merge_config() {
         project_path="${project_from_config}"
     fi
 
-    local socket_from_config="$(_get_config_value "${config}" "socket" "__DEVCONF_NO_SOCKET__")"
+    local socket_from_config
+    socket_from_config="$(_get_config_value "${config}" "socket" "__DEVCONF_NO_SOCKET__")"
     local socket_value=""
     if [[ -n "${socket_override}" ]]; then
         socket_value="${socket_override}"
@@ -464,8 +478,10 @@ _merge_config() {
         socket_value="${socket_from_config}"
     fi
 
-    local startup_cmd="$(_get_config_value "${config}" "startup_cmd" "")"
-    local persist_mode_raw="$(_get_config_value "${config}" "persist" "false")"
+    local startup_cmd
+    startup_cmd="$(_get_config_value "${config}" "startup_cmd" "")"
+    local persist_mode_raw
+    persist_mode_raw="$(_get_config_value "${config}" "persist" "false")"
     local persist_mode_value="false"
     local persist_mode_lower
     persist_mode_lower=$(printf '%s' "${persist_mode_raw}" | tr '[:upper:]' '[:lower:]')
@@ -547,7 +563,8 @@ _fdevc_start() {
             return 1
         fi
         # Verify config exists
-        local source_config=$(_load_config "${copy_config_source}")
+        local source_config
+        source_config=$(_load_config "${copy_config_source}")
         if [[ -z "${source_config}" || "${source_config}" == "{}" ]]; then
             _msg_error "No config found for: ${copy_config_source}"
             return 1
@@ -568,7 +585,8 @@ _fdevc_start() {
     
     # Check if copying from a VM container to preserve VM mode
     if [[ -n "${copy_config_from}" ]]; then
-        local source_name="$(_resolve_container_name "${copy_config_from}")"
+        local source_name
+        source_name="$(_resolve_container_name "${copy_config_from}")"
         if [[ "${source_name}" == fdevc.vm.* ]]; then
             is_vm_copy=true
         fi
@@ -663,7 +681,8 @@ _fdevc_start() {
     elif [[ -n "${copy_config_source}" ]]; then
         # When copying config, check if source has no project_path (e.g., VM container)
         # If so, preserve that state instead of defaulting to PWD
-        local source_project=$(_get_config "${copy_config_source}" "project_path")
+        local source_project
+        source_project=$(_get_config "${copy_config_source}" "project_path")
         if [[ -z "${source_project}" ]]; then
             merge_project_path="__NO_PROJECT__"
         fi
@@ -727,7 +746,8 @@ _fdevc_start() {
 
     local config_differs=false
     if [[ "${force_recreate}" == true ]]; then
-        local saved_config="$(_load_config "${container_name}")"
+        local saved_config
+        saved_config="$(_load_config "${container_name}")"
         if [[ -n "${saved_config}" && "${saved_config}" != "{}" ]]; then
             local saved_ports saved_image saved_docker_cmd saved_project_path saved_socket_state
             saved_ports=$(_get_config_value "${saved_config}" "ports" "")
@@ -792,7 +812,8 @@ _fdevc_start() {
 
     if [[ "${container_exists}" == true ]]; then
         if [[ "${remove_on_exit}" != true ]]; then
-            local created_at_current_save="$(_container_created_at "${container_name}" "${docker_cmd}")"
+            local created_at_current_save
+            created_at_current_save="$(_container_created_at "${container_name}" "${docker_cmd}")"
             _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "${created_at_current_save}" "${persist_to_save}"
         fi
 
@@ -835,7 +856,8 @@ _fdevc_start() {
             _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "" "${persist_to_save}"
         fi
 
-        local image=$(_resolve_image "${image_config}" "${docker_cmd}" "${container_name}") || { _msg_error "Failed to resolve image"; return 1; }
+        local image
+        image=$(_resolve_image "${image_config}" "${docker_cmd}" "${container_name}") || { _msg_error "Failed to resolve image"; return 1; }
 
         _msg_info "Creating '${container_name}' (image: ${image})"
         [[ -n "${ports}" ]] && _msg_detail "Ports: ${ports}"
@@ -865,7 +887,8 @@ _fdevc_start() {
             return 1
         fi
         if [[ "${remove_on_exit}" != true ]]; then
-            local created_at_current_post="$(_container_created_at "${container_name}" "${docker_cmd}")"
+            local created_at_current_post
+            created_at_current_post="$(_container_created_at "${container_name}" "${docker_cmd}")"
             if [[ -n "${created_at_current_post}" ]]; then
                 _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "${created_at_current_post}" "${persist_to_save}"
             fi
@@ -903,7 +926,8 @@ _fdevc_start() {
         if [[ "${remove_on_exit}" == true ]]; then
             _msg_info "Removing '${container_name}'..."
             _msg_docker_cmd "${docker_cmd} rm -f ${container_name}"
-            local image_to_remove_on_exit="$(_container_image_name "${container_name}" "${docker_cmd}")"
+            local image_to_remove_on_exit
+            image_to_remove_on_exit="$(_container_image_name "${container_name}" "${docker_cmd}")"
             if _docker_exec "${docker_cmd}" rm -f "${container_name}" >/dev/null 2>&1; then
                 _msg_success "Removed"
                 _remove_image_if_exists "${image_to_remove_on_exit}" "${docker_cmd}"
@@ -938,7 +962,8 @@ _fdevc_stop() {
         esac
     done
 
-    local container_name="$(_resolve_container_name "${container_arg}")"
+    local container_name
+    container_name="$(_resolve_container_name "${container_arg}")"
     [[ -z "${container_name}" ]] && { _msg_error "No container found at id ${container_arg}. Run 'fdevc ls'."; return 1; }
 
     local docker_cmd="${docker_cmd_override:-$(_get_config "${container_name}" "docker_cmd")}"
@@ -947,7 +972,12 @@ _fdevc_stop() {
     _msg_info "Stopping '${container_name}'..."
     _container_exists "${container_name}" "${docker_cmd}" || { _msg_error "Container '${container_name}' not found"; return 1; }
     _msg_docker_cmd "${docker_cmd} stop ${container_name}"
-    _docker_exec "${docker_cmd}" stop "${container_name}" >/dev/null 2>&1 && _msg_success "Stopped" || { _msg_error "Failed"; return 1; }
+    if _docker_exec "${docker_cmd}" stop "${container_name}" >/dev/null 2>&1; then
+        _msg_success "Stopped"
+    else
+        _msg_error "Failed"
+        return 1
+    fi
 }
 
 _fdevc_rm() {
@@ -962,13 +992,15 @@ _fdevc_rm() {
         esac
     done
     
-    local container_name="$(_resolve_container_name "${container_arg}")"
+    local container_name
+    container_name="$(_resolve_container_name "${container_arg}")"
     [[ -z "${container_name}" ]] && { _msg_error "No container found at id ${container_arg}. Run 'fdevc ls'."; return 1; }
 
     local docker_cmd="${docker_cmd_override:-$(_get_config "${container_name}" "docker_cmd")}"
     docker_cmd="${docker_cmd:-${FDEVC_DOCKER}}"
 
-    local config_json=$(_load_config "${container_name}")
+    local config_json
+    config_json=$(_load_config "${container_name}")
     config_json="${config_json//$'\n'/}"
     local has_config=false
     [[ -n "${config_json}" && "${config_json}" != "{}" ]] && has_config=true
@@ -1158,7 +1190,8 @@ _fdevc_config() {
     elif [[ -n "${remove_target}" ]]; then
         # Check if it's an id
         if [[ "${remove_target}" =~ ^[0-9]+$ ]]; then
-            local container_name=$(_get_container_by_index "${remove_target}")
+            local container_name
+            container_name=$(_get_container_by_index "${remove_target}")
             if [[ -z "${container_name}" ]]; then
                 _msg_error "No configuration found at id ${remove_target}"
                 return 1

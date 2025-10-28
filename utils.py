@@ -6,6 +6,7 @@ import random
 import re
 import sys
 from datetime import datetime, timezone
+from typing import Any
 
 COLOR_RESET = "\033[0m"
 COLOR_BOLD = "\033[1m"
@@ -23,18 +24,18 @@ ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 TIMESTAMP_FRACTION_RE = re.compile(r"(\.\d+)(?=(?:Z|[+-]\d{2}:?\d{2})?$)")
 
 
-def visible_length(text):
+def visible_length(text: str) -> int:
     """Return the printable length of text without ANSI escape codes."""
     return len(ANSI_ESCAPE_RE.sub("", text))
 
 
-def pad_to_width(text, target_width):
+def pad_to_width(text: str, target_width: int) -> str:
     """Pad a text (with ANSI codes) to the target visible width."""
     extra = target_width - visible_length(text)
     return f"{text}{' ' * extra}" if extra > 0 else text
 
 
-def collapse_home_path(path):
+def collapse_home_path(path: str) -> str:
     """Replace a leading HOME directory with ~ for display."""
     if not path:
         return path
@@ -54,7 +55,7 @@ def collapse_home_path(path):
     return path
 
 
-def format_created_timestamp(raw):
+def format_created_timestamp(raw: str) -> str:
     """Format raw creation string into 'YYYY-MM-DD HH:MM:SS'."""
     if not raw:
         return ""
@@ -101,7 +102,7 @@ def format_created_timestamp(raw):
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
-def normalize_iso_timestamp(value):
+def normalize_iso_timestamp(value: Any) -> str:
     """Trim sub-second precision from ISO-like timestamps."""
     if value is None:
         return ""
@@ -113,9 +114,9 @@ def normalize_iso_timestamp(value):
     return TIMESTAMP_FRACTION_RE.sub("", text, count=1)
 
 
-def build_mode_indicators(name, persist=False):
+def build_mode_indicators(name: str, persist: bool = False) -> str:
     """Return concatenated mode indicators (VM, tmp, persist)."""
-    indicators = []
+    indicators: list[str] = []
     if name.startswith("fdevc.vm."):
         indicators.append(f" {COLOR_MAGENTA}🖥️ VM mode{COLOR_RESET}")
     if name.endswith(".tmp"):
@@ -129,10 +130,13 @@ NAME_MIN_WIDTH = 28
 MAX_FIELD_WIDTH = 80  # Maximum width for project path and command fields
 HEADER_EXTRA_PADDING = 2
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_IMAGE_PATH = os.environ.get("FDEVC_IMAGE") or os.path.join(
-    SCRIPT_DIR, "Dockerfile"
+DEFAULT_IMAGE_PATH = os.environ.get("FDEVC_IMAGE", "fdevc:latest")
+# Only compute absolute path if it's a file path, not an image name
+DEFAULT_IMAGE_ABS = (
+    os.path.abspath(DEFAULT_IMAGE_PATH)
+    if os.path.sep in DEFAULT_IMAGE_PATH or DEFAULT_IMAGE_PATH.endswith(".Dockerfile")
+    else DEFAULT_IMAGE_PATH
 )
-DEFAULT_IMAGE_ABS = os.path.abspath(DEFAULT_IMAGE_PATH)
 
 ADJECTIVES = [
     "happy",
@@ -206,14 +210,14 @@ ANIMALS = [
 ]
 
 
-def generate_project_label():
+def generate_project_label() -> str:
     """Generate a random project label (adjective-animal)."""
     adj = random.choice(ADJECTIVES)
     animal = random.choice(ANIMALS)
     return f"{adj}-{animal}"
 
 
-def format_image_display(image_val, project_path):
+def format_image_display(image_val: str, project_path: str | None) -> str:
     """Format image value for display, handling relative paths and defaults."""
     if not image_val:
         return f"{COLOR_CYAN}🐳 default{COLOR_RESET}"
@@ -240,7 +244,7 @@ def format_image_display(image_val, project_path):
     return f"{COLOR_CYAN}🐳 {image_val}{COLOR_RESET}"
 
 
-def format_socket_display(socket_raw):
+def format_socket_display(socket_raw: Any) -> str:
     """Format socket configuration for display."""
     if isinstance(socket_raw, str):
         socket_enabled = socket_raw.strip().lower() in {"true", "1", "yes"}
@@ -252,7 +256,7 @@ def format_socket_display(socket_raw):
     return f"{socket_color}{socket_symbol} socket{COLOR_RESET}"
 
 
-def truncate_field(text, max_width=MAX_FIELD_WIDTH):
+def truncate_field(text: str | None, max_width: int = MAX_FIELD_WIDTH) -> str:
     """Truncate text if it exceeds max_width, adding ellipsis."""
     if not text:
         return ""
@@ -261,7 +265,7 @@ def truncate_field(text, max_width=MAX_FIELD_WIDTH):
     return text[: max_width - 3] + "..."
 
 
-def load_config(config_file, container_name):
+def load_config(config_file: str, container_name: str) -> None:
     """Load configuration for a specific container."""
     try:
         with open(config_file, "r", encoding="utf-8") as f:
@@ -272,7 +276,7 @@ def load_config(config_file, container_name):
         print("{}")
 
 
-def get_config_value(key, default=""):
+def get_config_value(key: str, default: str = "") -> None:
     """Extract a value from JSON config passed via stdin."""
     try:
         cfg = json.load(sys.stdin)
@@ -286,17 +290,17 @@ def get_config_value(key, default=""):
 
 
 def save_config(
-    config_file,
-    container_name,
-    ports="",
-    image="",
-    docker_cmd="",
-    project_path="",
-    startup_cmd="",
-    socket_state=None,
-    created_at="",
-    persist="",
-):
+    config_file: str,
+    container_name: str,
+    ports: str = "",
+    image: str = "",
+    docker_cmd: str = "",
+    project_path: str = "",
+    startup_cmd: str = "",
+    socket_state: Any = None,
+    created_at: str = "",
+    persist: str = "",
+) -> None:
     """Save container configuration."""
     data = {}
     if os.path.exists(config_file):
@@ -355,7 +359,7 @@ def save_config(
         json.dump(data, f, indent=2, sort_keys=True)
 
 
-def remove_config(config_file, container_name):
+def remove_config(config_file: str, container_name: str) -> None:
     """Remove container configuration."""
     if os.path.exists(config_file):
         try:
@@ -368,7 +372,7 @@ def remove_config(config_file, container_name):
             pass
 
 
-def list_containers(config_file):
+def list_containers(config_file: str) -> None:
     """List all containers with their status and configuration."""
     docker_containers = {}
     for line in sys.stdin:
@@ -422,7 +426,8 @@ def list_containers(config_file):
 
         if container_info["in_docker"]:
             status = container_info["status"] or ""
-            if "Up" in status:
+            status_str = str(status)
+            if "Up" in status_str:
                 status_display = "Running ●"
             else:
                 status_display = "Stopped ○"
@@ -437,13 +442,15 @@ def list_containers(config_file):
 
         socket_raw = cfg.get("socket")
         if socket_raw is None:
-            socket_label = (container_info.get("socket_label") or "").strip().lower()
+            socket_label_raw = container_info.get("socket_label") or ""
+            socket_label = str(socket_label_raw).strip().lower()
             if socket_label in {"true", "1", "yes"}:
                 socket_enabled = True
             elif socket_label in {"false", "0", "no"}:
                 socket_enabled = False
             else:
-                mounts = (container_info.get("mounts") or "").lower()
+                mounts_raw = container_info.get("mounts") or ""
+                mounts = str(mounts_raw).lower()
                 socket_enabled = "/var/run/docker.sock" in mounts
         elif isinstance(socket_raw, str):
             lowered = socket_raw.strip().lower()
@@ -493,8 +500,9 @@ def list_containers(config_file):
 
         created_display = ""
         raw_created = ""
-        if container_info.get("created_at"):
-            raw_created = container_info["created_at"].strip()
+        created_at_raw = container_info.get("created_at")
+        if created_at_raw:
+            raw_created = str(created_at_raw).strip()
         elif cfg.get("created_at"):
             raw_created = str(cfg["created_at"]).strip()
 
@@ -518,29 +526,29 @@ def list_containers(config_file):
     rendered_rows = []
 
     for row in rows:
-        idx, name, created_display, status, config_lines = row
+        row_idx, row_name, row_created, row_status, row_config = row
 
-        if "●" in status:
+        if "●" in row_status:
             status_color = COLOR_GREEN
-        elif "○" in status:
+        elif "○" in row_status:
             status_color = COLOR_RED
         else:
             status_color = COLOR_DIM
 
-        status_plain = status.strip().rjust(status_width)
+        status_plain = row_status.strip().rjust(status_width)
         status_colored = f"{status_color}{status_plain}{COLOR_RESET}"
 
-        name_colored = f"{COLOR_BOLD}{name.ljust(name_width)}{COLOR_RESET}"
-        created_plain = created_display.strip().rjust(created_width)
+        name_colored = f"{COLOR_BOLD}{row_name.ljust(name_width)}{COLOR_RESET}"
+        created_plain = row_created.strip().rjust(created_width)
         created_colored = f"{COLOR_DIM}{created_plain}{COLOR_RESET}"
-        prefix = f"{idx:<{idx_width}}  {name_colored}  {created_colored}  "
+        prefix = f"{row_idx:<{idx_width}}  {name_colored}  {created_colored}  "
         table_width = max(
             table_width,
             visible_length(prefix) + visible_length(status_plain),
         )
 
         rendered_config = []
-        for line in config_lines:
+        for line in row_config:
             config_line = f"    {line}"
             table_width = max(table_width, visible_length(config_line))
             rendered_config.append(config_line)
@@ -573,7 +581,7 @@ def list_containers(config_file):
             print(pad_to_width(line, table_width))
 
 
-def resolve_index(config_file, index_str):
+def resolve_index(config_file: str, index_str: str) -> None:
     """Resolve a container id against docker and config entries."""
     try:
         index_num = int(index_str)
@@ -606,7 +614,7 @@ def resolve_index(config_file, index_str):
         print("")
 
 
-def list_configs(config_file):
+def list_configs(config_file: str) -> None:
     """Display all saved configurations in a table (reuses list_containers logic)."""
     if not os.path.exists(config_file):
         config_dir = os.path.dirname(config_file)
@@ -687,7 +695,9 @@ def list_configs(config_file):
     config_header = collapse_home_path(config_file) if config_file else "CONFIGURATIONS"
 
     idx_width = max(len("#"), max(len(row[0]) for row in rows))
-    name_width = max(NAME_MIN_WIDTH, len(config_header), max(len(row[1]) for row in rows))
+    name_width = max(
+        NAME_MIN_WIDTH, len(config_header), max(len(row[1]) for row in rows)
+    )
     created_width = max(len("CREATED"), max(len(row[2]) for row in rows))
 
     header_prefix = f"{'#':<{idx_width}}  {config_header:<{name_width}}  "
@@ -698,19 +708,19 @@ def list_configs(config_file):
     rendered_rows = []
 
     for row in rows:
-        idx, name, created_display, config_lines = row
+        row_idx, row_name, row_created, row_config = row
 
-        name_colored = f"{COLOR_BOLD}{name.ljust(name_width)}{COLOR_RESET}"
-        created_plain = created_display.strip().rjust(created_width)
+        name_colored = f"{COLOR_BOLD}{row_name.ljust(name_width)}{COLOR_RESET}"
+        created_plain = row_created.strip().rjust(created_width)
         created_colored = f"{COLOR_DIM}{created_plain}{COLOR_RESET}"
 
         rendered_config = []
-        for line in config_lines:
+        for line in row_config:
             config_line = f"    {line}"
             table_width = max(table_width, visible_length(config_line))
             rendered_config.append(config_line)
 
-        rendered_rows.append((idx, name_colored, created_colored, rendered_config))
+        rendered_rows.append((row_idx, name_colored, created_colored, rendered_config))
 
     table_width = max(table_width, visible_length(header_text)) + HEADER_EXTRA_PADDING
 
@@ -724,9 +734,9 @@ def list_configs(config_file):
     print(f"{COLOR_DIM}{'─' * table_width}{COLOR_RESET}")
 
     # Print rows with proper spacing
-    for idx, name_colored, created_colored, rendered_config in rendered_rows:
+    for row_idx, name_colored, created_colored, rendered_config in rendered_rows:
         # Build row with spacing to align created column to the right
-        row_prefix = f"{idx:<{idx_width}}  {name_colored}  "
+        row_prefix = f"{row_idx:<{idx_width}}  {name_colored}  "
         row_spacing = max(
             0,
             table_width - visible_length(row_prefix) - visible_length(created_colored),
@@ -737,7 +747,7 @@ def list_configs(config_file):
             print(config_line)
 
 
-def remove_all_configs(config_file):
+def remove_all_configs(config_file: str) -> None:
     """Remove all configurations."""
     if os.path.exists(config_file):
         try:

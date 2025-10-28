@@ -2,9 +2,13 @@
 
 Lightweight CLI for fast & repeatable dev environments.
 
-Create or attach a container for the current directory. Stops on exit unless using persistent mode (-d flag).
+Create or attach a container for the current directory. Stops on exit unless using persistent mode (-d).
 
-[![Python](https://img.shields.io/badge/python-3%2B-blue)](https://www.python.org/downloads/)
+[![Curl](https://img.shields.io/badge/curl-required-orange)](https://curl.se/)
+[![Git](https://img.shields.io/badge/git-required-orange)](https://git-scm.com/)
+[![Docker](https://img.shields.io/badge/docker-required-orange)](https://www.docker.com/get-started/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![Actions status](https://github.com/philogicae/fast_dev_container/actions/workflows/ci-cd.yml/badge.svg?cache-control=no-cache)](https://github.com/philogicae/fast_dev_container/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/philogicae/fast_dev_container)
 
@@ -21,8 +25,6 @@ git clone https://github.com/philogicae/fast_dev_container.git ~/.fdevc
 echo 'source ~/.fdevc/fdevc.sh' >> ~/.bashrc  # or ~/.zshrc
 source ~/.bashrc  # or ~/.zshrc
 ```
-
-**Requirements:** Docker (or Podman/compatible), Python 3, and Git.
 
 ## Usage
 
