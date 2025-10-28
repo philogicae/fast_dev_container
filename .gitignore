@@ -7,3 +7,5 @@ __pycache__/
 *.swp
 *~
 .DS_Store
+.mypy_cache
+.ruff_cache
