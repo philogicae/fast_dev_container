@@ -239,7 +239,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/philogicae/fast_dev_container/m
     printf "\033[1;34m🐳 Docker\033[0m \033[0;36m$(docker --version | awk '{print $3}' | tr -d ',')\033[0m • \033[1;34mCompose\033[0m \033[0;36m$(docker compose version --short)\033[0m\n"; \
     printf "\033[0;90m🔧 Git\033[0m \033[0;36m$(git --version | awk '{print $3}')\033[0m • \033[0;90mCMake\033[0m \033[0;36m$(cmake --version | head -n1 | awk '{print $3}')\033[0m • \033[0;90mMake\033[0m \033[0;36m$(make --version | head -n1 | awk '{print $3}')\033[0m\n"; \
     if [ "${NODE_INSTALL}" != "false" ] && command -v gemini >/dev/null 2>&1; then \
-    printf "\033[1;36m✨ Gemini CLI\033[0m \033[0;36m•\033[0m "; \
+    printf "\033[1;36m✨ Gemini CLI\033[0m \033[0;37m•\033[0m "; \
     fi; \
     printf "\033[1;35m📦 Fdevc\033[0m\n"; \
     printf "\033[1;32m✅ Ready for development!\033[0m\n\n"; \

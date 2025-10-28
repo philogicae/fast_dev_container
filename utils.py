@@ -125,7 +125,7 @@ NAME_MIN_WIDTH = 28
 MAX_FIELD_WIDTH = 80  # Maximum width for project path and command fields
 HEADER_EXTRA_PADDING = 2
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_IMAGE_PATH = os.environ.get("FDEVC_IMAGE", "fdevc:latest")
+DEFAULT_IMAGE_PATH = os.environ.get("FDEVC_IMAGE", "philogicae/fdevc:latest")
 # Only compute absolute path if it's a file path, not an image name
 DEFAULT_IMAGE_ABS = (
     os.path.abspath(DEFAULT_IMAGE_PATH)

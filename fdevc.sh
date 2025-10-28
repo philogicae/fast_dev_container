@@ -8,7 +8,7 @@ if [[ -n "${ZSH_VERSION}" ]]; then
 else
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
-: "${FDEVC_IMAGE:=fdevc:latest}"
+: "${FDEVC_IMAGE:=philogicae/fdevc:latest}"
 CONFIG_FILE="${SCRIPT_DIR}/.fdevc_config.json"
 UTILS_PY="${SCRIPT_DIR}/utils.py"
 HELP_FILE="${SCRIPT_DIR}/help.txt"
@@ -651,6 +651,7 @@ _fdevc_start() {
         container_name="fdevc.$(_generate_project_label)"
         config_target_name="${container_name}"
     else
+        local container_name
         container_name="$(_resolve_container_name "${container_arg}")"
         [[ -z "${container_name}" ]] && { _msg_error "No container found at id ${container_arg}. Run 'fdevc ls'."; return 1; }
         config_target_name="${container_name}"
@@ -840,6 +841,11 @@ _fdevc_start() {
             if [[ ${exit_code} -ne 0 ]]; then
                 _msg_error "Failed to start"
                 _handle_port_conflict "${start_error}" "${docker_cmd}"
+                if [[ -n "${start_error}" ]]; then
+                    while IFS= read -r line; do
+                        [[ -n "${line}" ]] && _msg_detail "${line}"
+                    done <<< "${start_error}"
+                fi
                 return 1
             fi
             container_running=true
@@ -889,12 +895,31 @@ _fdevc_start() {
         run_args+=("${port_flags_arr[@]}" "${image}")
 
         _msg_docker_cmd "${docker_cmd} run ${run_args[*]}"
-        local error_output exit_code
-        error_output=$(_docker_exec "${docker_cmd}" run "${run_args[@]}" 2>&1)
-        exit_code=$?
+        _msg_detail "Pulling image layers (Docker output below)..."
+        local error_output="" run_output_file=""
+        run_output_file=$(mktemp -t fdevc-run-XXXX 2>/dev/null || printf '/tmp/fdevc-run-%s' "$$")
+        local exit_code
+        if [[ -n "${ZSH_VERSION-}" ]]; then
+            (
+                setopt pipefail
+                _docker_exec "${docker_cmd}" run "${run_args[@]}" 2>&1 | tee "${run_output_file}"
+            )
+            exit_code=$?
+        else
+            (
+                set -o pipefail
+                _docker_exec "${docker_cmd}" run "${run_args[@]}" 2>&1 | tee "${run_output_file}"
+            )
+            exit_code=$?
+        fi
+        error_output=$(cat "${run_output_file}" 2>/dev/null || true)
+        rm -f "${run_output_file}" 2>/dev/null || true
         if [[ ${exit_code} -ne 0 ]]; then
             _msg_error "Failed to create"
             _handle_port_conflict "${error_output}" "${docker_cmd}"
+            if [[ -z "${error_output}" ]]; then
+                _msg_detail "Docker did not return additional details."
+            fi
             return 1
         fi
         if [[ "${remove_on_exit}" != true ]]; then
