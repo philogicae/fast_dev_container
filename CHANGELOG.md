@@ -13,11 +13,16 @@
 - Enhance Docker setup and improve non-TTY support
 - Improve Docker setup and fdevc error handling
 - Add CI/CD workflow and enhance Dockerfile configurability
+- Improve code reliability and user experience
 
 ### 🐛 Bug Fixes
 
 - Streamline Docker environment configuration
 - Improve argument handling in container start script
+
+### 🚜 Refactor
+
+- Simplify Deno installation and improve error handling
 
 ### 📚 Documentation
 
@@ -25,3 +30,8 @@
 - Update changelog with new container features
 - Update changelog with container and script improvements
 - Update changelog with Docker and error handling improvements
+- Update changelog with CI/CD and Docker improvements
+
+### ⚙️ Miscellaneous Tasks
+
+- Update gitignore to exclude additional cache directories
