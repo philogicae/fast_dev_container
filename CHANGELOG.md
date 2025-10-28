@@ -1,9 +1,18 @@
 ## [unreleased]
 
+### 🚀 Features
+
+- Optimize Dockerfile and improve path resolution
+## [1.0.1] - 2025-10-28
+
 ### 🐛 Bug Fixes
 
 - Improve GitHub Actions cache handling and permissions
 - Update Docker installation in Dockerfile
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog with recent Docker and CI improvements
 ## [1.0.0] - 2025-10-28
 
 ### 🚀 Features
