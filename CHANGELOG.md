@@ -1,5 +1,11 @@
 ## [unreleased]
 
+### 🐛 Bug Fixes
+
+- Improve GitHub Actions cache handling and permissions
+- Update Docker installation in Dockerfile
+## [1.0.0] - 2025-10-28
+
 ### 🚀 Features
 
 - Enhance development container with improved tooling and UX
@@ -14,6 +20,7 @@
 - Improve Docker setup and fdevc error handling
 - Add CI/CD workflow and enhance Dockerfile configurability
 - Improve code reliability and user experience
+- Enable Docker build caching in CI pipeline
 
 ### 🐛 Bug Fixes
 
@@ -31,6 +38,7 @@
 - Update changelog with container and script improvements
 - Update changelog with Docker and error handling improvements
 - Update changelog with CI/CD and Docker improvements
+- Update changelog with recent improvements and fixes
 
 ### ⚙️ Miscellaneous Tasks
 
