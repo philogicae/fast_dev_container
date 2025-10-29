@@ -84,7 +84,7 @@ check_dependency() {
 }
 
 check_dependencies() {
-	log_step "Checking dependencies..."
+	log_step "Checking dependencies"
 	local all_ok=true
 
 	if ! check_dependency git "Git"; then
@@ -185,12 +185,12 @@ install_fdevc() {
 	check_dependencies
 
 	# Step 2: Install or update
-	log_step "Installing Fast Dev Container..."
+	log_step "Installing Fast Dev Container"
 
 	if [[ -d "${INSTALL_DIR}" ]]; then
 		log_highlight "${ICON_PACKAGE} Existing installation detected"
 		log_detail "Location: ${INSTALL_DIR}"
-		log_step "Updating to latest version..."
+		log_step "Updating to latest version"
 
 		cd "${INSTALL_DIR}" || {
 			log_error "Failed to access ${INSTALL_DIR}"
@@ -223,7 +223,7 @@ install_fdevc() {
 	fi
 
 	# Step 3: Configure shell
-	log_step "Configuring shell integration..."
+	log_step "Configuring shell integration"
 
 	mapfile -t shell_configs < <(detect_shell_configs)
 
@@ -237,7 +237,7 @@ install_fdevc() {
 
 	for shell_config in "${shell_configs[@]}"; do
 		if [[ ! -e "${shell_config}" ]]; then
-			log_step "Preparing ${shell_config}..."
+			log_step "Preparing ${shell_config}"
 			local shell_config_dir
 			shell_config_dir=$(dirname "${shell_config}")
 
@@ -264,7 +264,7 @@ install_fdevc() {
 		if grep -qF 'FDEVC' "${shell_config}" 2>/dev/null; then
 			log_highlight "${ICON_CHECK} Already configured: ${shell_config}"
 		else
-			log_step "Adding to ${shell_config}..."
+			log_step "Adding to ${shell_config}"
 			cat <<'EOF' >>"${shell_config}"
 
 # Fast Dev Container
@@ -277,7 +277,7 @@ EOF
 
 	# Step 4: Load commands when possible
 	if [[ -t 0 ]]; then
-		log_step "Loading fdevc for this session..."
+		log_step "Loading fdevc for this session"
 		export FDEVC="${INSTALL_DIR}/fdevc.sh"
 		# shellcheck disable=SC1090
 		if source "${FDEVC}" 2>/dev/null; then

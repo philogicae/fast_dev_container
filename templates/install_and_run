@@ -40,29 +40,27 @@ command_exists() {
 }
 
 check_fdevc() {
-	log_step "Checking for fdevc..."
+	log_step "Checking for fdevc"
 	if command_exists fdevc; then
-		log_success "fdevc is already installed"
+		log_success "fdevc is already installed, skipping installation"
 		return 0
 	fi
 	local fallback_script="$HOME/.fdevc/fdevc.sh"
 	if [ -f "${fallback_script}" ]; then
-		log_detail "Sourcing ${fallback_script}..."
+		log_detail "Found fdevc at ${fallback_script}, sourcing"
 		# shellcheck disable=SC1090
 		source "${fallback_script}" 2>/dev/null || true
 		if command_exists fdevc; then
-			log_success "fdevc loaded from ${fallback_script}"
+			log_success "fdevc loaded successfully, skipping installation"
 			return 0
 		fi
-	else
-		log_detail "No fallback script found at ${fallback_script}"
 	fi
-	log_warning "fdevc not found"
+	log_detail "fdevc not found, will install"
 	return 1
 }
 
 install_fdevc() {
-	log_step "Installing fdevc..."
+	log_step "Installing fdevc"
 	if curl -fsSL https://raw.githubusercontent.com/philogicae/fast_dev_container/main/install | bash; then
 		log_success "fdevc installed successfully"
 	else
@@ -86,9 +84,9 @@ install_fdevc() {
 clone_repo() {
 	local repo_url="https://github.com/__USER__/__PROJECT__.git"
 	local project_name="__PROJECT__"
-	log_step "Cloning repository..."
+	log_step "Cloning repository"
 	if [ -d "$project_name" ]; then
-		log_warning "Project '$project_name' already exists, entering it..."
+		log_warning "Project '$project_name' already exists, entering it"
 		cd "$project_name" || {
 			log_error "Failed to enter project"
 			exit 1
@@ -108,7 +106,7 @@ clone_repo() {
 }
 
 run_launch_script() {
-	log_step "Running launch script..."
+	log_step "Running launch script"
 	if [ ! -f "./launch.sh" ]; then
 		log_error "launch.sh not found in current directory"
 		exit 1

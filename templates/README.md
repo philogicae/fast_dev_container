@@ -19,15 +19,24 @@ curl -fsSL https://raw.githubusercontent.com/__USER__/__PROJECT__/main/install_a
 
 ## Structure
 
+```
+__PROJECT__/
+├── README.md
+├── install_and_run        # Installation script (curl one-liner)
+├── launch.sh              # Container launcher with predefined settings
+└── fdevc_setup/
+    └── runnable.sh        # Main script that runs inside the container
+```
+
 - **`install_and_run`** - Installation script that ensures `fdevc` is available, clones this repository, and runs `launch.sh`.
 - **`launch.sh`** - Helper script to launch a container using `fdevc` with predefined settings. Edit the configuration variables at the top to customize ports, image, persistence, etc.
-- **`runnable.sh`** - The main script that runs inside the container.
+- **`fdevc_setup/runnable.sh`** - The main script that runs inside the container. The `fdevc_setup` folder is mounted to `/workspace` in the container.
 
 # TODO & REMOVE (for runnable project creators)
 
-1. **Replace** `__USER__` with your GitHub username in all files.
-2. **Edit** `runnable.sh` to add your setup commands, install tools, or run applications.
+1. **Replace** `__USER__` with your GitHub username in the Quick Install section above.
+2. **Edit** `fdevc_setup/runnable.sh` to add your setup commands, install tools, or run applications.
 3. **Edit** `launch.sh` to change container configuration (ports, image, persistence mode, etc.).
 4. **Edit** `README.md` to match your project's needs and remove this section.
-5. **Optional:** Run `fdevc custom` to create a custom ./fdevc.Dockerfile that you can edit and commit for more advanced configurations.
+5. **Optional:** Run `fdevc custom` in the project root to create a custom ./fdevc.Dockerfile that you can edit and commit for more advanced configurations.
 6. **Optional:** Add an `## Usage` section to explain how to use the project.

@@ -2,14 +2,19 @@
 set -e
 
 # Configuration variables - modify these as needed
-FDEVC="${FDEVC:-${HOME}/.fdevc/fdevc.sh}"
 CONTAINER_NAME="__PROJECT__"
 IMAGE=""
 PORTS=""
-STARTUP_CMD="./runnable.sh"
+VOLUMES=()                  # Additional volumes: VOLUMES=("/data:/data" "myvolume:/vol")
+STARTUP_CMD="./runnable.sh" # Container path (fdevc_setup/ mounted to /workspace)
+DOCKER_CMD=""               # Override: "podman", "docker -H host", etc.
 PERSIST="false"
 DOCKER_SOCKET="true"
 FORCE="false"
+
+# Internal variables
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FDEVC="${FDEVC:-${HOME}/.fdevc/fdevc.sh}"
 
 # Resolve fdevc command invocation
 FDEVC_CMD=()
@@ -24,75 +29,46 @@ else
 	exit 1
 fi
 
-# Build fdevc command arguments
+# Build fdevc arguments
 FDEVC_ARGS=()
-CONTAINER_ARG=""
+[ -n "$DOCKER_CMD" ] && FDEVC_ARGS+=(--dkr "$DOCKER_CMD")
+[ -n "$IMAGE" ] && FDEVC_ARGS+=(-i "$IMAGE")
+[ -n "$PORTS" ] && FDEVC_ARGS+=(-p "$PORTS")
+[ -n "$STARTUP_CMD" ] && FDEVC_ARGS+=(--c-s "$STARTUP_CMD")
+[ "$DOCKER_SOCKET" != "true" ] && FDEVC_ARGS+=(--no-s)
+[ "$PERSIST" = "true" ] && FDEVC_ARGS+=(-d) || FDEVC_ARGS+=(--no-d)
+[ "$FORCE" = "true" ] && FDEVC_ARGS+=(-f)
 
-# Determine container name handling
+# Mount fdevc_setup to /workspace (skip auto project mount)
+FDEVC_ARGS+=(--no-v-dir -v "${PROJECT_DIR}/fdevc_setup:/workspace")
+
+# Add custom volumes
+for vol in "${VOLUMES[@]}"; do
+	[ -n "$vol" ] && FDEVC_ARGS+=(-v "$vol")
+done
+
+# Resolve container name
+CONTAINER_ARG=""
 if [ -n "$CONTAINER_NAME" ]; then
-	# Resolve actual container name
 	ACTUAL_NAME="$CONTAINER_NAME"
 	[ "$CONTAINER_NAME" = "__PROJECT__" ] && ACTUAL_NAME="$(basename "$PWD")"
-	# Resolve docker command (split into array for multi-word commands like "docker -H host")
-	DOCKER_CMD_STR="${FDEVC_DOCKER:-docker}"
-	read -ra DOCKER_CMD_PARTS <<<"$DOCKER_CMD_STR"
-	# Check if container already exists
-	FULL_CONTAINER_NAME="fdevc.${ACTUAL_NAME}"
-	if "${DOCKER_CMD_PARTS[@]}" ps -a --filter "name=^${FULL_CONTAINER_NAME}$" --format '{{.Names}}' 2>/dev/null | grep -q "^${FULL_CONTAINER_NAME}$"; then
-		# Container exists, use as positional argument (reattach)
-		CONTAINER_ARG="$FULL_CONTAINER_NAME"
+	# Check if container exists
+	DOCKER_CHECK="${DOCKER_CMD:-${FDEVC_DOCKER:-docker}}"
+	read -ra DOCKER_PARTS <<<"$DOCKER_CHECK"
+	if "${DOCKER_PARTS[@]}" ps -a --filter "name=^fdevc.${ACTUAL_NAME}$" --format '{{.Names}}' 2>/dev/null | grep -q "^fdevc.${ACTUAL_NAME}$"; then
+		CONTAINER_ARG="fdevc.${ACTUAL_NAME}"
 	else
-		# Container doesn't exist, use -n to create it
 		FDEVC_ARGS+=(-n "$ACTUAL_NAME")
 	fi
 fi
 
-# Add startup command
-if [ -n "$STARTUP_CMD" ]; then
-	FDEVC_ARGS+=(--c-s "$STARTUP_CMD")
-fi
+# Launch container
+echo "Launching container with fdevc"
+[ -n "$CONTAINER_ARG" ] && FDEVC_ARGS+=("$CONTAINER_ARG")
 
-# Add image if specified
-if [ -n "$IMAGE" ]; then
-	FDEVC_ARGS+=(-i "$IMAGE")
-fi
-
-# Add ports if specified
-if [ -n "$PORTS" ]; then
-	FDEVC_ARGS+=(-p "$PORTS")
-fi
-
-# Disable volume mounting (no project path)
-FDEVC_ARGS+=(--no-v)
-
-# Configure socket
-if [ "$DOCKER_SOCKET" != "true" ]; then
-	FDEVC_ARGS+=(--no-s)
-fi
-
-# Configure persistence
-if [ "$PERSIST" = "true" ]; then
-	FDEVC_ARGS+=(-d)
-else
-	FDEVC_ARGS+=(--no-d)
-fi
-
-# Configure force
-if [ "$FORCE" = "true" ]; then
-	FDEVC_ARGS+=(-f)
-fi
-
-# Launch the container
-echo "Launching container with fdevc..."
 if [ -n "$FDEVC_SOURCE" ]; then
-	# Source-based invocation (requires quoting for bash -lc)
-	# shellcheck disable=SC1003
-	printf -v FDEVC_ARGS_QUOTED ' %q' "${FDEVC_ARGS[@]}"
-	CONTAINER_ARG_QUOTED=""
-	[ -n "$CONTAINER_ARG" ] && printf -v CONTAINER_ARG_QUOTED ' %q' "$CONTAINER_ARG"
-	bash -lc "source '$FDEVC_SOURCE' && fdevc${FDEVC_ARGS_QUOTED}${CONTAINER_ARG_QUOTED}"
+	printf -v ARGS_QUOTED ' %q' "${FDEVC_ARGS[@]}"
+	bash -lc "source '$FDEVC_SOURCE' && fdevc${ARGS_QUOTED}"
 else
-	# Command-based invocation
-	[ -n "$CONTAINER_ARG" ] && FDEVC_ARGS+=("$CONTAINER_ARG")
 	"${FDEVC_CMD[@]}" "${FDEVC_ARGS[@]}"
 fi

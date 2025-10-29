@@ -5,7 +5,7 @@ COMMANDS
 --------
 
 fdevc [id|name] [OPTIONS]
-    Start/attach container for current directory.
+    Create/start/attach container for current directory or existing container.
     Container stops automatically on exit unless -d flag is used.
     Equivalent to: fdevc start [id|name] [OPTIONS]
     
@@ -16,6 +16,9 @@ fdevc [id|name] [OPTIONS]
         --dkr CMD     Docker-compatible command (docker, podman, etc.)
         -i IMAGE      Docker image name or path to Dockerfile
         -p PORTS      Port mappings (space-separated, e.g., "8080 3000:3001")
+        -v VOLUME     Volume mount (can be repeated)
+                      Host path: "/data:/data" or "./local:/workspace"
+                      Named volume: "myvolume:/vol" (directory auto-created)
         -c CMD        Run command once on attach (not saved)
         --c-s CMD     Run command on attach and save for future sessions
         --cp ID|NAME  Copy configuration from another container
@@ -24,7 +27,8 @@ fdevc [id|name] [OPTIONS]
         -d            Detach mode (persist on exit)
         --no-d        Attach mode (default)
         --tmp         Temporary mode (remove container on exit, overrides -d)
-        --no-v        Skip volume mount (no project directory access)
+        --no-dir      No project directory (config won't set project_path)
+        --no-v-dir    Skip auto-mounting project_path (but still saves it in config)
         --no-s        Skip Docker socket mount (no nested containers)
         --no-c        Skip startup command
 
@@ -32,13 +36,16 @@ fdevc start [id|name] [OPTIONS]
     Explicit alias for fdevc (above)
 
 fdevc new [OPTIONS]
-    Create a new timestamped container for current directory.
+    Create a new timestamped container for current directory or existing container.
     Useful for parallel isolated environments.
     
     Options:
         --dkr CMD     Docker-compatible command (docker, podman, etc.)
         -i IMAGE      Docker image name or path to Dockerfile
         -p PORTS      Port mappings (space-separated, e.g., "8080 3000:3001")
+        -v VOLUME     Volume mount (can be repeated)
+                      Host path: "/data:/data" or "./local:/workspace"
+                      Named volume: "myvolume:/vol" (directory auto-created)
         -c CMD        Run command once on attach (not saved)
         --c-s CMD     Run command on attach and save for future sessions
         --cp ID|NAME  Copy configuration from another container
@@ -47,19 +54,23 @@ fdevc new [OPTIONS]
         -d            Detach mode (persist on exit)
         --no-d        Attach mode (default)
         --tmp         Temporary mode (remove container on exit, overrides -d)
-        --no-v        Skip volume mount (no project directory access)
+        --no-dir      No project directory (config won't set project_path)
+        --no-v-dir    Skip auto-mounting project_path (but still saves it in config)
         --no-s        Skip Docker socket mount (no nested containers)
         --no-c        Skip startup command
 
 fdevc vm [OPTIONS]
-    Create a VM-like container with no volume or socket mounts.
-    Shortcut for: fdevc start --no-v --no-s
+    Create a VM-like container with no project directory or socket mounts.
+    Shortcut for: fdevc start --no-dir --no-s
     Container name: fdevc.vm.<random-name> or fdevc.vm.<basename> with -n
     
     Options:
         --dkr CMD     Docker-compatible command (docker, podman, etc.)
         -i IMAGE      Docker image name or path to Dockerfile
         -p PORTS      Port mappings (space-separated)
+        -v VOLUME     Volume mount (can be repeated)
+                      Host path: "/data:/data" or "./local:/workspace"
+                      Named volume: "myvolume:/vol" (directory auto-created)
         -c CMD        Run command once on attach (not saved)
         --c-s CMD     Run command on attach and save for future sessions
         --cp ID|NAME  Copy configuration from VM container
@@ -80,14 +91,17 @@ fdevc stop [id|name] [OPTIONS]
         --dkr CMD     Docker-compatible command (docker, podman, etc.)
 
 fdevc rm [id|name] [OPTIONS]
-    Stop and remove a container.
+    Remove a container and volumes. Behavior depends on container state:
+    - Running: Deletes container and volumes (keeps config/image for restart)
+    - Stopped: Deletes container, volumes, image (unless default)
+    - --all: Deletes everything (container, volumes, image, config)
     
     Arguments:
         id|name       Container id or name from fdevc ls (omit for current directory)
     
     Options:
         -f, --force   Force remove without stopping gracefully
-        --all         Delete saved configuration too
+        --all         Delete everything regardless of state
         --dkr CMD     Docker-compatible command (docker, podman, etc.)
 
 fdevc ls
@@ -117,10 +131,10 @@ fdevc gen <name>
         name          Name of the project to create
     
     Creates a project folder with:
-        runnable.sh      Script that runs inside the container
-        launch.sh        Helper to launch container with predefined settings
-        install_and_run  Installation script for easy deployment
-        README.md        Documentation with TODO section
+        README.md                 Documentation with TODO section
+        install_and_run           Installation script for easy deployment
+        launch.sh                 Helper to launch container with predefined settings
+        fdevc_setup/runnable.sh   Script that runs inside the container
     
     Use case: Share portable container configs via git repositories.
     After replacing __USER__ with your GitHub username and customizing files,

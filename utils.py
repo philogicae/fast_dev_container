@@ -122,14 +122,29 @@ def build_mode_indicators(name: str, persist: bool = False) -> str:
 
 
 NAME_MIN_WIDTH = 28
-MAX_FIELD_WIDTH = 80  # Maximum width for project path and command fields
 HEADER_EXTRA_PADDING = 2
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_IMAGE_PATH = os.environ.get("FDEVC_IMAGE", "philogicae/fdevc:latest")
-# Only compute absolute path if it's a file path, not an image name
+
+
+def _is_docker_image_name(path: str) -> bool:
+    """Check if a path is a Docker image name (registry/name:tag) vs a file path."""
+    if path.endswith(".Dockerfile") or path.endswith("/Dockerfile"):
+        return False
+    if ":" in path and not path.startswith("/") and not path.startswith("./"):
+        return True
+    if path.startswith("./") or path.startswith("/"):
+        return False
+    if "/" in path and "." not in os.path.basename(path):
+        return True
+    return False
+
+
 DEFAULT_IMAGE_ABS = (
     os.path.abspath(DEFAULT_IMAGE_PATH)
-    if os.path.sep in DEFAULT_IMAGE_PATH or DEFAULT_IMAGE_PATH.endswith(".Dockerfile")
+    if DEFAULT_IMAGE_PATH
+    and not _is_docker_image_name(DEFAULT_IMAGE_PATH)
+    and os.path.exists(DEFAULT_IMAGE_PATH)
     else DEFAULT_IMAGE_PATH
 )
 
@@ -215,26 +230,35 @@ def generate_project_label() -> str:
 def format_image_display(image_val: str, project_path: str | None) -> str:
     """Format image value for display, handling relative paths and defaults."""
     if not image_val:
-        return f"{COLOR_CYAN}🐳 default{COLOR_RESET}"
+        return f"{COLOR_CYAN}🐳 default image{COLOR_RESET}"
 
-    image_abs = os.path.abspath(image_val) if os.path.isabs(image_val) else None
+    # Check if it's the default image first (compare both as-is and normalized)
+    if image_val == DEFAULT_IMAGE_PATH or image_val == DEFAULT_IMAGE_ABS:
+        return f"{COLOR_CYAN}🐳 default image{COLOR_RESET}"
+
+    # If it's a Docker image name (not a file path), display as-is
+    if _is_docker_image_name(image_val):
+        return f"{COLOR_CYAN}🐳 {image_val}{COLOR_RESET}"
+
+    # Handle file paths
+    image_abs = (
+        os.path.abspath(image_val) if not os.path.isabs(image_val) else image_val
+    )
 
     # Try to display relative to project path if both are absolute
     if project_path and os.path.isabs(project_path):
         project_abs = os.path.abspath(project_path)
-        target_abs = image_abs or os.path.abspath(os.path.join(project_abs, image_val))
         try:
-            common_root = os.path.commonpath([project_abs, target_abs])
+            common_root = os.path.commonpath([project_abs, image_abs])
+            if common_root == project_abs:
+                rel_part = os.path.relpath(image_abs, project_abs)
+                return f"{COLOR_CYAN}🐳 ./{rel_part}{COLOR_RESET}"
         except ValueError:
-            common_root = None
-        if common_root == project_abs:
-            rel_part = os.path.relpath(target_abs, project_abs)
-            return f"{COLOR_CYAN}🐳 ./{rel_part}{COLOR_RESET}"
+            pass
 
-    # Check if it's the default image
-    image_abs = image_abs or os.path.abspath(image_val)
+    # Check if the absolute path matches default
     if image_abs == DEFAULT_IMAGE_ABS:
-        return f"{COLOR_CYAN}🐳 default{COLOR_RESET}"
+        return f"{COLOR_CYAN}🐳 default image{COLOR_RESET}"
 
     return f"{COLOR_CYAN}🐳 {image_val}{COLOR_RESET}"
 
@@ -251,13 +275,50 @@ def format_socket_display(socket_raw: Any) -> str:
     return f"{socket_color}{socket_symbol} socket{COLOR_RESET}"
 
 
-def truncate_field(text: str | None, max_width: int = MAX_FIELD_WIDTH) -> str:
-    """Truncate text if it exceeds max_width, adding ellipsis."""
-    if not text:
-        return ""
-    if len(text) <= max_width:
-        return text
-    return text[: max_width - 3] + "..."
+def prettify_placeholder_path(path: str, project_path: str | None = None) -> str:
+    """Convert placeholder paths (__HOME__, __PROJECT_PATH__) to display format (~, .)."""
+    if not path:
+        return path
+    if path == "__PROJECT_PATH__":
+        return "."
+    elif path == "__HOME__":
+        return "~"
+    elif path.startswith("__PROJECT_PATH__/"):
+        return "./" + path[17:]
+    elif path.startswith("__HOME__/"):
+        return "~/" + path[9:]
+    else:
+        display = collapse_home_path(path)
+        if project_path and os.path.isabs(project_path) and os.path.isabs(display):
+            try:
+                if display.startswith(project_path + os.sep):
+                    display = "./" + os.path.relpath(display, project_path)
+            except (ValueError, OSError):
+                pass
+        return display
+
+
+def format_volume_display(
+    volume: str, project_path: str | None, container_name: str | None = None
+) -> str:
+    """Format a single volume mount for display with two-color syntax (magenta:violet)."""
+    if not volume:
+        return volume
+    if ":" not in volume:
+        # Volume name only (from Docker mounts) - strip container prefix if present
+        source = volume
+        if container_name and source.startswith(f"{container_name}."):
+            source = source[len(container_name) + 1 :]
+        return f"{COLOR_MAGENTA}{prettify_placeholder_path(source, project_path)}{COLOR_RESET}"
+    parts = volume.split(":", 1)
+    source = parts[0]
+    dest = parts[1] if len(parts) > 1 else ""
+    if container_name and source.startswith(f"{container_name}."):
+        source = source[len(container_name) + 1 :]
+    source_display = prettify_placeholder_path(source, project_path)
+    if not dest:
+        return f"{COLOR_MAGENTA}{source_display}{COLOR_RESET}"
+    return f"{COLOR_MAGENTA}{source_display}{COLOR_RESET}:{COLOR_DIM}{COLOR_MAGENTA}{dest}{COLOR_RESET}"
 
 
 def load_config(config_file: str, container_name: str) -> None:
@@ -277,7 +338,11 @@ def get_config_value(key: str, default: str = "") -> None:
         cfg = json.load(sys.stdin)
         val = cfg.get(key, default)
         if isinstance(val, list):
-            print(" ".join(val))
+            # Use ||| separator for volumes, space for others (ports)
+            if key == "volumes":
+                print("|||".join(val))
+            else:
+                print(" ".join(val))
         else:
             print(val)
     except (json.JSONDecodeError, KeyError, AttributeError):
@@ -295,6 +360,7 @@ def save_config(
     socket_state: Any = None,
     created_at: str = "",
     persist: str = "",
+    volumes: str = "",
 ) -> None:
     """Save container configuration."""
     data = {}
@@ -323,7 +389,10 @@ def save_config(
         cfg["startup_cmd"] = startup_cmd
     else:
         cfg.pop("startup_cmd", None)
-    # Remove legacy project_alias if it exists
+    if volumes:
+        cfg["volumes"] = [v for v in volumes.split("|||") if v]
+    else:
+        cfg.pop("volumes", None)
     cfg.pop("project_alias", None)
 
     if socket_state is not None:
@@ -375,12 +444,41 @@ def list_containers(config_file: str) -> None:
             parts = line.strip().split("|||")
             if len(parts) >= 2:
                 name, status = parts[0], parts[1]
-                mounts = parts[3] if len(parts) >= 4 else ""
+                mounts_json = parts[3] if len(parts) >= 4 else ""
                 socket_label = parts[4] if len(parts) >= 5 else ""
                 created_at = parts[5] if len(parts) >= 6 else ""
+
+                # Parse JSON mounts to extract volume information
+                parsed_mounts = []
+                if mounts_json and mounts_json not in ("", "null", "[]"):
+                    try:
+                        mounts_data = json.loads(mounts_json)
+                        if isinstance(mounts_data, list):
+                            for mount in mounts_data:
+                                if isinstance(mount, dict):
+                                    mount_type = mount.get("Type", "")
+                                    destination = mount.get("Destination", "")
+                                    # For named volumes, use Name instead of Source
+                                    if mount_type == "volume":
+                                        source = mount.get("Name", "")
+                                    else:
+                                        source = mount.get("Source", "")
+                                    if source and destination:
+                                        parsed_mounts.append(f"{source}:{destination}")
+                                    elif source:
+                                        parsed_mounts.append(source)
+                    except (json.JSONDecodeError, AttributeError, TypeError):
+                        # Fallback to old format (comma-separated string)
+                        if "," in mounts_json:
+                            parsed_mounts = [
+                                m.strip() for m in mounts_json.split(",") if m.strip()
+                            ]
+                        elif mounts_json:
+                            parsed_mounts = [mounts_json]
+
                 docker_containers[name] = {
                     "status": status,
-                    "mounts": mounts,
+                    "mounts": parsed_mounts,
                     "socket_label": socket_label,
                     "created_at": created_at,
                 }
@@ -397,7 +495,7 @@ def list_containers(config_file: str) -> None:
     for name, info in docker_containers.items():
         all_containers[name] = {
             "status": info.get("status"),
-            "mounts": info.get("mounts", ""),
+            "mounts": info.get("mounts", []),
             "socket_label": info.get("socket_label", ""),
             "created_at": info.get("created_at", ""),
             "in_docker": True,
@@ -444,9 +542,16 @@ def list_containers(config_file: str) -> None:
             elif socket_label in {"false", "0", "no"}:
                 socket_enabled = False
             else:
-                mounts_raw = container_info.get("mounts") or ""
-                mounts = str(mounts_raw).lower()
-                socket_enabled = "/var/run/docker.sock" in mounts
+                mounts_from_docker = container_info.get("mounts") or []
+                if isinstance(mounts_from_docker, list):
+                    socket_enabled = any(
+                        "/var/run/docker.sock" in str(m).lower()
+                        for m in mounts_from_docker
+                    )
+                else:
+                    socket_enabled = (
+                        "/var/run/docker.sock" in str(mounts_from_docker).lower()
+                    )
         elif isinstance(socket_raw, str):
             lowered = socket_raw.strip().lower()
             if lowered in {"false", "0", "no"}:
@@ -466,10 +571,7 @@ def list_containers(config_file: str) -> None:
 
         project_path = cfg.get("project_path")
         display_project_path = (
-            collapse_home_path(project_path) if project_path else None
-        )
-        truncated_project = (
-            truncate_field(display_project_path) if display_project_path else None
+            prettify_placeholder_path(project_path) if project_path else None
         )
 
         image_val = cfg.get("image")
@@ -477,8 +579,8 @@ def list_containers(config_file: str) -> None:
         if image_line and (not config_lines or config_lines[-1] != image_line):
             config_lines.append(image_line)
 
-        if truncated_project:
-            config_lines.append(f"{COLOR_YELLOW}📁 {truncated_project}{COLOR_RESET}")
+        if display_project_path:
+            config_lines.append(f"{COLOR_YELLOW}📁 {display_project_path}{COLOR_RESET}")
 
         ports_val = cfg.get("ports")
         if ports_val:
@@ -489,9 +591,47 @@ def list_containers(config_file: str) -> None:
             if ports_str:
                 config_lines.append(f"{COLOR_BLUE}🔀 {ports_str}{COLOR_RESET}")
 
+        # Get volumes from config or Docker mounts
+        volumes_val = cfg.get("volumes")
+        volume_list = []
+
+        # Use config volumes if available and non-empty
+        if volumes_val and (
+            (isinstance(volumes_val, list) and len(volumes_val) > 0)
+            or (not isinstance(volumes_val, list))
+        ):
+            volume_list = (
+                volumes_val if isinstance(volumes_val, list) else [volumes_val]
+            )
+        # Otherwise, use Docker mounts (for --tmp containers or containers without config)
+        if not volume_list and container_info["in_docker"]:
+            mounts_from_docker = container_info.get("mounts", [])
+            if isinstance(mounts_from_docker, list):
+                for mount in mounts_from_docker:
+                    mount_str = str(mount).strip()
+                    if mount_str and "docker.sock" not in mount_str:
+                        volume_list.append(mount_str)
+            elif mounts_from_docker:
+                # Fallback for old string format
+                for mount in str(mounts_from_docker).split(","):
+                    mount = mount.strip()
+                    if mount and "docker.sock" not in mount:
+                        volume_list.append(mount)
+
+        if volume_list:
+            for vol in volume_list:
+                vol_str = str(vol)
+                if vol_str and not (
+                    vol_str == "/var/run/docker.sock:/var/run/docker.sock"
+                    or "docker.sock" in vol_str
+                ):
+                    formatted_vol = format_volume_display(vol_str, project_path, name)
+                    if formatted_vol:
+                        config_lines.append(f"💾 {formatted_vol}")
+
         if cfg.get("startup_cmd"):
-            truncated_cmd = truncate_field(cfg["startup_cmd"])
-            config_lines.append(f"{COLOR_YELLOW}▶ {truncated_cmd}{COLOR_RESET}")
+            display_cmd = prettify_placeholder_path(cfg["startup_cmd"], project_path)
+            config_lines.append(f"{COLOR_YELLOW}▶ {display_cmd}{COLOR_RESET}")
 
         created_display = ""
         raw_created = ""
@@ -633,7 +773,7 @@ def list_configs(config_file: str) -> None:
         return
 
     if not config_data:
-        print(f"{COLOR_DIM}No configurations saved{COLOR_RESET}")
+        print("No configurations saved")
         return
 
     # Build rows using the same logic as list_containers, but without status
@@ -654,10 +794,7 @@ def list_configs(config_file: str) -> None:
 
         project_path = cfg.get("project_path")
         display_project_path = (
-            collapse_home_path(project_path) if project_path else None
-        )
-        truncated_project = (
-            truncate_field(display_project_path) if display_project_path else None
+            prettify_placeholder_path(project_path) if project_path else None
         )
 
         image_val = cfg.get("image")
@@ -665,8 +802,8 @@ def list_configs(config_file: str) -> None:
         if image_line:
             config_lines.append(image_line)
 
-        if truncated_project:
-            config_lines.append(f"{COLOR_YELLOW}📁 {truncated_project}{COLOR_RESET}")
+        if display_project_path:
+            config_lines.append(f"{COLOR_YELLOW}📁 {display_project_path}{COLOR_RESET}")
 
         ports_val = cfg.get("ports")
         if ports_val:
@@ -677,9 +814,24 @@ def list_configs(config_file: str) -> None:
             if ports_str:
                 config_lines.append(f"{COLOR_BLUE}🔀 {ports_str}{COLOR_RESET}")
 
+        volumes_val = cfg.get("volumes")
+        if volumes_val:
+            volume_list = (
+                volumes_val if isinstance(volumes_val, list) else [volumes_val]
+            )
+            for vol in volume_list:
+                vol_str = str(vol)
+                if vol_str and not (
+                    vol_str == "/var/run/docker.sock:/var/run/docker.sock"
+                    or "docker.sock" in vol_str
+                ):
+                    formatted_vol = format_volume_display(vol_str, project_path, name)
+                    if formatted_vol:
+                        config_lines.append(f"💾 {formatted_vol}")
+
         if cfg.get("startup_cmd"):
-            truncated_cmd = truncate_field(cfg["startup_cmd"])
-            config_lines.append(f"{COLOR_YELLOW}▶ {truncated_cmd}{COLOR_RESET}")
+            display_cmd = prettify_placeholder_path(cfg["startup_cmd"], project_path)
+            config_lines.append(f"{COLOR_YELLOW}▶ {display_cmd}{COLOR_RESET}")
 
         raw_created = str(cfg.get("created_at", "")).strip()
         created_display = format_created_timestamp(raw_created)
@@ -780,6 +932,7 @@ if __name__ == "__main__":
             sys.argv[9] if len(sys.argv) > 9 else None,
             sys.argv[10] if len(sys.argv) > 10 else "",
             sys.argv[11] if len(sys.argv) > 11 else "",
+            sys.argv[12] if len(sys.argv) > 12 else "",
         )
     elif command == "remove_config":
         remove_config(sys.argv[2], sys.argv[3])
