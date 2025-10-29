@@ -1,4 +1,4 @@
-Fast Dev Container - Lightweight Container Dev Environments
+Fast Dev Container - Lightweight CLI for Dev Environments
 ===========================================================
 
 COMMANDS

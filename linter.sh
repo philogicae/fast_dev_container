@@ -2,6 +2,8 @@
 set -euo pipefail
 
 export PATH="${HOME}/.local/bin:${PATH}"
+APT_UPDATED=0
+PYTHON_BIN=""
 
 log() {
 	printf '%s\n' "$1"
@@ -16,30 +18,28 @@ die() {
 	exit 1
 }
 
-APT_UPDATED=0
-
 apt_install() {
 	local package="$1"
+	local -a cmd_prefix=()
 	if ! command -v apt-get >/dev/null 2>&1; then
 		die "apt-get not available to install ${package}"
 	fi
-
+	if ((EUID != 0)); then
+		if ! command -v sudo >/dev/null 2>&1; then
+			die "sudo required to run apt-get as non-root to install ${package}"
+		fi
+		cmd_prefix=(sudo)
+	fi
 	if ((APT_UPDATED == 0)); then
-		if ((EUID == 0)); then
-			apt-get update
-		else
-			if ! command -v sudo >/dev/null 2>&1; then
-				die "sudo required to install ${package}"
-			fi
-			sudo apt-get update
+		log "Running apt-get update..."
+		if ! "${cmd_prefix[@]}" apt-get update; then
+			die "apt-get update failed"
 		fi
 		APT_UPDATED=1
 	fi
-
-	if ((EUID == 0)); then
-		apt-get install -y "${package}"
-	else
-		sudo apt-get install -y "${package}"
+	log "Installing ${package} via apt-get..."
+	if ! "${cmd_prefix[@]}" apt-get install -y "${package}"; then
+		die "Failed to install ${package} via apt-get"
 	fi
 }
 
@@ -47,14 +47,13 @@ ensure_shellcheck() {
 	if command -v shellcheck >/dev/null 2>&1; then
 		return
 	fi
-
 	log "Installing shellcheck..."
 	if command -v apt-get >/dev/null 2>&1; then
 		apt_install shellcheck
 	elif command -v brew >/dev/null 2>&1; then
 		brew install shellcheck
 	else
-		die "Unable to install shellcheck (supported package managers: apt-get, brew)"
+		die "Unable to install shellcheck (supported: apt-get, brew)"
 	fi
 }
 
@@ -62,7 +61,6 @@ ensure_shfmt() {
 	if command -v shfmt >/dev/null 2>&1; then
 		return
 	fi
-
 	log "Installing shfmt..."
 	if command -v apt-get >/dev/null 2>&1; then
 		apt_install shfmt
@@ -71,16 +69,15 @@ ensure_shfmt() {
 	elif command -v go >/dev/null 2>&1; then
 		local gobin="${GOBIN:-${HOME}/go/bin}"
 		mkdir -p "${gobin}"
-		GO111MODULE=on GOBIN="${gobin}" go install mvdan.cc/sh/v3/cmd/shfmt@latest
+		if ! GO111MODULE=on GOBIN="${gobin}" go install mvdan.cc/sh/v3/cmd/shfmt@latest; then
+			die "go install for shfmt failed"
+		fi
 		export PATH="${gobin}:${PATH}"
 	else
 		die "Unable to install shfmt (supported: apt-get, brew, go)"
 	fi
-
 	command -v shfmt >/dev/null 2>&1 || die "shfmt installation failed"
 }
-
-PYTHON_BIN=""
 
 detect_python() {
 	if command -v python3 >/dev/null 2>&1; then
@@ -88,27 +85,27 @@ detect_python() {
 	elif command -v python >/dev/null 2>&1; then
 		PYTHON_BIN="$(command -v python)"
 	else
-		die "Python interpreter not found"
+		die "Python interpreter not found (python3 or python)"
 	fi
+	log "Using Python interpreter: ${PYTHON_BIN}"
 }
 
 ensure_pip() {
-	if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
-		log "Bootstrapping pip..."
-		"${PYTHON_BIN}" -m ensurepip --upgrade >/dev/null 2>&1 || die "Failed to bootstrap pip"
+	if "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+		return
 	fi
+	log "Bootstrapping pip..."
+	"${PYTHON_BIN}" -m ensurepip --upgrade >/dev/null 2>&1 || die "Failed to bootstrap pip"
 }
 
 ensure_python_tools() {
-	local missing=()
-
+	local -a missing=() # Use an array for missing packages
 	if ! "${PYTHON_BIN}" -m ruff --version >/dev/null 2>&1; then
 		missing+=("ruff")
 	fi
 	if ! "${PYTHON_BIN}" -m mypy --version >/dev/null 2>&1; then
 		missing+=("mypy")
 	fi
-
 	if ((${#missing[@]} > 0)); then
 		ensure_pip
 		log "Installing Python tools: ${missing[*]}"
@@ -141,30 +138,24 @@ SHELLCHECK_FILES=(
 log "Shell Formatting..."
 for script in "${SHFMT_FILES[@]}"; do
 	if [[ ! -f "${script}" ]]; then
-		log_warn "File not found: ${script}"
+		log_warn "File not found, skipping shfmt: ${script}"
 		continue
 	fi
-	if ! shfmt -w "${script}"; then
-		log_warn "shfmt skipped ${script} (unsupported syntax)"
-	fi
+	shfmt -w "${script}"
 done
 
 log "Shell Linting..."
 for script in "${SHELLCHECK_FILES[@]}"; do
 	if [[ ! -f "${script}" ]]; then
-		log_warn "File not found: ${script}"
+		log_warn "File not found, skipping shellcheck: ${script}"
 		continue
 	fi
 	shellcheck "${script}"
 done
 
-if [[ -f "utils.py" ]]; then
-	log "Python Formatting..."
-	"${PYTHON_BIN}" -m ruff format utils.py
+log "Python Formatting..."
+"${PYTHON_BIN}" -m ruff format .
 
-	log "Python Linting..."
-	"${PYTHON_BIN}" -m ruff check utils.py --fix
-	"${PYTHON_BIN}" -m mypy utils.py --strict
-else
-	log_warn "utils.py not found, skipping Python linting"
-fi
+log "Python Linting..."
+"${PYTHON_BIN}" -m ruff check . --fix
+"${PYTHON_BIN}" -m mypy . --strict

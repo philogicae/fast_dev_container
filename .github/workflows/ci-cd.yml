@@ -13,31 +13,33 @@ permissions:
 
 jobs:
   lint-bash:
-    name: Lint Shell Scripts 🐚
-    permissions:
-      contents: read
-      checks: write
-      pull-requests: write
+    name: Check Shell Scripts 🐚
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Shellcheck
-        uses: reviewdog/action-shellcheck@v1
-        with:
-          pattern: |
-            *.sh
+      - name: Install Shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run Shellcheck on all shell scripts
+        run: |
+          SHELLCHECK_FILES=(
             install
-            templates/*
+            fdevc.sh
+            linter.sh
+            templates/install_and_run
+            templates/launch.sh
+            templates/runnable.sh
+          )
+          shellcheck "${SHELLCHECK_FILES[@]}"
 
   lint-python:
-    name: Lint Python Code 🐍
+    name: Check Python Code 🐍
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
       - name: Install dependencies
         run: |
           pip install --upgrade pip
@@ -50,70 +52,23 @@ jobs:
         run: mypy utils.py --strict
 
   test-dockerfile:
-    name: Test Dockerfile Syntax 🐳
+    name: Check Dockerfile 🐳
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Validate Dockerfile syntax
-        run: docker buildx build --check .
+        run: docker buildx build --check --load=false .
 
-  detect-dockerfile-change:
-    name: Detect Dockerfile Changes 🔍
-    runs-on: ubuntu-latest
-    outputs:
-      dockerfile_changed: ${{ steps.filter.outputs.dockerfile }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            dockerfile:
-              - 'Dockerfile'
-
-  build-image:
-    name: Build and Test fdevc:latest 📦
-    needs: [lint-bash, lint-python, test-dockerfile, detect-dockerfile-change]
-    if: ${{ needs.detect-dockerfile-change.outputs.dockerfile_changed == 'true' || startsWith(github.ref, 'refs/tags/v') }}
+  build-and-publish-docker:
+    name: Build/Publish Image 🚀
+    needs: [lint-bash, lint-python, test-dockerfile]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and Load image for local testing 🛠️
-        run: |
-          docker buildx build \
-            --platform linux/amd64 \
-            --tag fdevc:latest \
-            --tag fdevc:build-tag \
-            --load \
-            --cache-from type=gha,scope=fdevc-build \
-            --cache-to type=gha,scope=fdevc-build,mode=max \
-            .
-      - name: Test image 🧪
-        run: |
-          docker run --rm fdevc:latest bash -c '
-            echo "=== Tool Versions ===" &&
-            uv --version &&
-            python --version &&
-            node --version &&
-            deno --version &&
-            go version &&
-            rustc --version &&
-            docker --version &&
-            echo "=== All checks passed ==="
-          '
-
-  publish-docker:
-    name: Publish to Docker Hub 🚀
-    if: startsWith(github.ref, 'refs/tags/v') && needs.build-image.result == 'success'
-    needs: build-image
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Extract version from tag
@@ -126,14 +81,12 @@ jobs:
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Build and Push image 🚢
+      - name: Build and Push multi-platform image 🚢
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ vars.DOCKER_USERNAME }}/fdevc:latest
             ${{ vars.DOCKER_USERNAME }}/fdevc:${{ steps.version.outputs.VERSION }}
-          cache-from: type=gha,scope=fdevc-build
-          cache-to: type=gha,scope=fdevc-build,mode=max

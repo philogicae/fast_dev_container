@@ -78,7 +78,15 @@ _docker_exec() {
     fi
     "${docker_parts[@]}" "$@"
 }
-_get_container_name() { echo "fdevc.$(basename "$PWD")"; }
+_get_container_name() { 
+    local basename_pwd
+    basename_pwd=$(basename "$PWD")
+    if [[ -z "${basename_pwd}" ]]; then
+        echo "fdevc.root"
+    else
+        echo "fdevc.${basename_pwd}"
+    fi
+}
 
 _generate_project_label() {
     ${FDEVC_PYTHON} "${UTILS_PY}" random_label

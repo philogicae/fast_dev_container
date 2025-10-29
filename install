@@ -23,6 +23,7 @@ ICON_CROSS="✗"
 ICON_ROCKET="🚀"
 ICON_PACKAGE="📦"
 ICON_SPARKLES="✨"
+ICON_TOOL="🛠️"
 
 log_step() {
 	echo -e "${BOLD}${CYAN}${ICON_ARROW} $1${RESET}"
@@ -62,7 +63,7 @@ print_banner() {
 /_/    \__,_/____/\__/  /_____/\___/|___/   \____/\____/_/ /_/\__/\__,_/_/_/ /_/\___/_/      
 EOF
 	echo -e "${RESET}"
-	echo -e "${BOLD}${MAGENTA}                    Lightweight Container Dev Environments${RESET}"
+	echo -e "${BOLD}${MAGENTA}Lightweight CLI for Dev Environments${RESET}"
 	echo ""
 }
 
@@ -84,8 +85,6 @@ check_dependency() {
 
 check_dependencies() {
 	log_step "Checking dependencies..."
-	echo ""
-
 	local all_ok=true
 
 	if ! check_dependency git "Git"; then
@@ -109,8 +108,6 @@ check_dependencies() {
 		log_detail "Or Podman: https://podman.io/getting-started/installation"
 		all_ok=false
 	fi
-
-	echo ""
 
 	if [[ "${all_ok}" == false ]]; then
 		log_error "Missing required dependencies"
@@ -186,16 +183,13 @@ install_fdevc() {
 
 	# Step 1: Check dependencies
 	check_dependencies
-	echo ""
 
 	# Step 2: Install or update
 	log_step "Installing Fast Dev Container..."
-	echo ""
 
 	if [[ -d "${INSTALL_DIR}" ]]; then
 		log_highlight "${ICON_PACKAGE} Existing installation detected"
 		log_detail "Location: ${INSTALL_DIR}"
-		echo ""
 		log_step "Updating to latest version..."
 
 		cd "${INSTALL_DIR}" || {
@@ -215,7 +209,6 @@ install_fdevc() {
 		fi
 	else
 		log_highlight "${ICON_PACKAGE} Installing to ${INSTALL_DIR}"
-		echo ""
 
 		if git clone --quiet "${REPO_URL}" "${INSTALL_DIR}" 2>&1; then
 			log_success "Repository cloned successfully"
@@ -229,29 +222,20 @@ install_fdevc() {
 		fi
 	fi
 
-	echo ""
-
 	# Step 3: Configure shell
 	log_step "Configuring shell integration..."
-	echo ""
 
 	mapfile -t shell_configs < <(detect_shell_configs)
 
 	if ((${#shell_configs[@]} == 0)); then
-		echo ""
 		log_warning "Manual setup required"
-		echo ""
 		log_detail "Add these lines to your shell config (.bashrc or .zshrc):"
-		echo ""
 		echo -e "    ${BOLD}${GREEN}export FDEVC=\"$HOME/.fdevc/fdevc.sh\"${RESET}"
 		echo -e "    ${BOLD}${GREEN}source $FDEVC${RESET}"
-		echo ""
 		exit 0
 	fi
 
 	for shell_config in "${shell_configs[@]}"; do
-		echo ""
-
 		if [[ ! -e "${shell_config}" ]]; then
 			log_step "Preparing ${shell_config}..."
 			local shell_config_dir
@@ -277,7 +261,7 @@ install_fdevc() {
 		fi
 
 		# shellcheck disable=SC2016
-		if grep -qF 'source $FDEVC' "${shell_config}" 2>/dev/null; then
+		if grep -qF 'FDEVC' "${shell_config}" 2>/dev/null; then
 			log_highlight "${ICON_CHECK} Already configured: ${shell_config}"
 		else
 			log_step "Adding to ${shell_config}..."
@@ -290,8 +274,6 @@ EOF
 			log_success "Added to ${shell_config}"
 		fi
 	done
-
-	echo
 
 	# Step 4: Load commands when possible
 	if [[ -t 0 ]]; then
@@ -306,24 +288,12 @@ EOF
 		fi
 	fi
 
-	echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-	echo -e "${BOLD}${GREEN}${ICON_SPARKLES}  Installation Complete! ${ICON_SPARKLES}${RESET}"
-	echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-
-	echo -e "${BOLD}${CYAN}${ICON_ROCKET} Quick Start:${RESET}"
-	echo -e "  ${BOLD}fdevc${RESET}              ${DIM}# Start/attach to container${RESET}"
-	echo -e "  ${BOLD}fdevc new${RESET}          ${DIM}# Create new timestamped container${RESET}"
-	echo -e "  ${BOLD}fdevc ls${RESET}           ${DIM}# List all containers${RESET}"
-	echo -e "  ${BOLD}fdevc custom${RESET}       ${DIM}# Copy template Dockerfile${RESET}"
-	echo -e "  ${BOLD}fdevc -h${RESET}           ${DIM}# Show full help${RESET}"
-
-	echo -e "${DIM}If commands are missing, run:${RESET}"
-	echo -e "  ${BOLD}${GREEN}source ${shell_config}${RESET}"
-	echo -e "${DIM}Or load directly with:${RESET}"
-	echo -e "  ${BOLD}${GREEN}export FDEVC=\"$HOME/.fdevc/fdevc.sh\"${RESET}"
-	echo -e "  ${BOLD}${GREEN}source $FDEVC${RESET}"
-
-	echo -e "${DIM}Documentation: ${BLUE}https://github.com/${GITHUB_REPO}${RESET}"
+	echo -e "${BOLD}${GREEN}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+	echo -e "${BOLD}${GREEN}${ICON_SPARKLES} Installation Complete! ${ICON_SPARKLES}${RESET}\n"
+	echo -e "${BOLD}${CYAN}${ICON_SPARKLES} Docs: ${RESET}https://github.com/${GITHUB_REPO}"
+	echo -e "${BOLD}${CYAN}${ICON_ROCKET} Quick Start: ${RESET}fdevc -h"
+	echo -e "${BOLD}${CYAN}${ICON_TOOL} If missing, run: ${RESET}source ${FDEVC}"
+	echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
 }
 
 # Run installation
