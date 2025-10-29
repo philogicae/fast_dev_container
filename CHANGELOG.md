@@ -17,6 +17,9 @@
 - Enable Docker build caching in CI pipeline
 - Optimize Dockerfile and improve path resolution
 - Enhance CI/CD workflow and container reliability
+- Streamline CI/CD workflow and improve shell scripts
+- Improve CLI documentation and container configuration
+- Improve multi-arch Docker build and deployment
 
 ### 🐛 Bug Fixes
 
@@ -29,6 +32,7 @@
 
 - Simplify Deno installation and improve error handling
 - Streamline CI/CD workflow for Docker builds
+- Consolidate changelog entries and remove duplicate records
 
 ### 📚 Documentation
 
