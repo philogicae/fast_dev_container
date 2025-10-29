@@ -11,6 +11,9 @@
 
 FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim
 
+# Detect target architecture (auto-provided by buildx, fallback to runtime detection)
+ARG TARGETARCH
+
 # Tool installation flags - EDIT THESE to enable/disable tools
 ENV NODE_INSTALL="true" \
     DENO_INSTALL="true" \
@@ -188,7 +191,8 @@ RUN if [ "${DENO_INSTALL}" != "false" ]; then \
 RUN if [ "${GO_INSTALL}" != "false" ]; then \
     GO_VER="${GO_VERSION}"; \
     if [ "${GO_INSTALL}" != "true" ]; then GO_VER="${GO_INSTALL}"; fi; \
-    curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz \
+    ARCH="${TARGETARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}"; \
+    curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-${ARCH}.tar.gz" -o /tmp/go.tar.gz \
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
     && rm /tmp/go.tar.gz \
     && mkdir -p /go/src /go/bin \
@@ -203,8 +207,7 @@ RUN if [ "${RUST_INSTALL}" != "false" ]; then \
     --default-toolchain "${TOOLCHAIN}" \
     --profile minimal \
     --component rustfmt,clippy,rust-analyzer \
-    && chmod -R a+w /usr/local/rustup /usr/local/cargo \
-    && /usr/local/cargo/bin/cargo install cargo-watch cargo-edit --locked; \
+    && chmod -R a+w /usr/local/rustup /usr/local/cargo; \
     fi
 
 # Set working directory

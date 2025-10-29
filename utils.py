@@ -509,7 +509,7 @@ def list_containers(config_file: str) -> None:
             }
 
     if not all_containers:
-        print("No dev containers found.")
+        print("No dev containers found")
         sys.exit(0)
 
     rows = []
