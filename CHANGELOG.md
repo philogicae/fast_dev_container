@@ -20,6 +20,7 @@
 - Streamline CI/CD workflow and improve shell scripts
 - Improve CLI documentation and container configuration
 - Improve multi-arch Docker build and deployment
+- Enhance project templates and Docker configuration
 
 ### 🐛 Bug Fixes
 
@@ -43,6 +44,7 @@
 - Update changelog with CI/CD and Docker improvements
 - Update changelog with recent improvements and fixes
 - Update changelog with Docker and CI improvements
+- Update changelog with latest CI/CD and Docker improvements
 
 ### ⚙️ Miscellaneous Tasks
 
