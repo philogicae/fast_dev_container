@@ -394,9 +394,22 @@ _save_config() {
             local collapsed_vol=$(_collapse_volume "${normalized_vol}" "${project_path}")
             collapsed_vol_list+=("${collapsed_vol}")
         done
-        if [[ ${#collapsed_vol_list[@]} -gt 0 ]]; then
+        
+        # Sort volumes: mount volumes (with :) first, then excluded volumes (without :)
+        local mount_volumes=()
+        local excluded_volumes=()
+        for vol in "${collapsed_vol_list[@]}"; do
+            if [[ "${vol}" == *:* ]]; then
+                mount_volumes+=("${vol}")
+            else
+                excluded_volumes+=("${vol}")
+            fi
+        done
+        local sorted_volumes=("${mount_volumes[@]}" "${excluded_volumes[@]}")
+        
+        if [[ ${#sorted_volumes[@]} -gt 0 ]]; then
             local first=true
-            for vol in "${collapsed_vol_list[@]}"; do
+            for vol in "${sorted_volumes[@]}"; do
                 if [[ "${first}" == true ]]; then
                     collapsed_volumes="${vol}"
                     first=false
@@ -1132,7 +1145,8 @@ _fdevc_start() {
                 local normalized_vol=$(_normalize_volume_name "${vol}" "${container_name}" "${project_path}")
                 run_args+=(-v "${normalized_vol}")
                 local vol_source="${normalized_vol%%:*}"
-                if [[ "${vol_source}" != /* && "${vol_source}" != ./* && "${normalized_vol}" == *:* ]]; then
+                # Only create directories for mount volumes (with destination), not excluded volumes
+                if [[ "${vol_source}" != /* && "${vol_source}" != ./* && "${normalized_vol}" == *:* && "${normalized_vol}" != *: ]]; then
                     # Extract the container path
                     local container_path="${normalized_vol#*:}"
                     dirs_to_create+=("${container_path}")

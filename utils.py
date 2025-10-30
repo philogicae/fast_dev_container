@@ -291,34 +291,57 @@ def prettify_placeholder_path(path: str, project_path: str | None = None) -> str
         display = collapse_home_path(path)
         if project_path and os.path.isabs(project_path) and os.path.isabs(display):
             try:
-                if display.startswith(project_path + os.sep):
-                    display = "./" + os.path.relpath(display, project_path)
+                project_norm = os.path.normpath(project_path)
+                display_norm = os.path.normpath(display)
+                if display_norm == project_norm:
+                    display = "."
+                elif display_norm.startswith(project_norm + os.sep):
+                    rel_path = os.path.relpath(display_norm, project_norm)
+                    display = "./" + rel_path
             except (ValueError, OSError):
                 pass
         return display
 
 
+def format_ports_display(ports_val: Any) -> str:
+    """Format ports for display, replacing ':' with '->'."""
+    if not ports_val:
+        return ""
+    if isinstance(ports_val, list):
+        ports_str = "\n    ".join(f"{COLOR_BLUE}🔀 {p}{COLOR_RESET}" for p in ports_val)
+    else:
+        ports_str = f"{COLOR_BLUE}🔀 {ports_val}{COLOR_RESET}"
+    return ports_str.replace(":", f"{COLOR_RESET} -> {COLOR_BLUE}")
+
+
 def format_volume_display(
     volume: str, project_path: str | None, container_name: str | None = None
 ) -> str:
-    """Format a single volume mount for display with two-color syntax (magenta:violet)."""
+    """Format a single volume mount for display with different colors by volume type."""
     if not volume:
         return volume
     if ":" not in volume:
-        # Volume name only (from Docker mounts) - strip container prefix if present
         source = volume
         if container_name and source.startswith(f"{container_name}."):
             source = source[len(container_name) + 1 :]
-        return f"{COLOR_MAGENTA}{prettify_placeholder_path(source, project_path)}{COLOR_RESET}"
+        return f"⛔ -> {COLOR_RED}{prettify_placeholder_path(source, project_path)}{COLOR_RESET}"
+
     parts = volume.split(":", 1)
     source = parts[0]
     dest = parts[1] if len(parts) > 1 else ""
     if container_name and source.startswith(f"{container_name}."):
         source = source[len(container_name) + 1 :]
     source_display = prettify_placeholder_path(source, project_path)
-    if not dest:
-        return f"{COLOR_MAGENTA}{source_display}{COLOR_RESET}"
-    return f"{COLOR_MAGENTA}{source_display}{COLOR_RESET}:{COLOR_DIM}{COLOR_MAGENTA}{dest}{COLOR_RESET}"
+    dest_color = COLOR_PINK
+    if (
+        source_display.startswith("/")
+        or source_display.startswith(".")
+        or source_display.startswith("~")
+    ):
+        source_color = COLOR_YELLOW
+    else:
+        source_color = COLOR_CYAN
+    return f"{source_color}{source_display}{COLOR_RESET} -> {dest_color}{dest}{COLOR_RESET}"
 
 
 def load_config(config_file: str, container_name: str) -> None:
@@ -583,13 +606,9 @@ def list_containers(config_file: str) -> None:
             config_lines.append(f"{COLOR_YELLOW}📁 {display_project_path}{COLOR_RESET}")
 
         ports_val = cfg.get("ports")
-        if ports_val:
-            if isinstance(ports_val, list):
-                ports_str = " ".join(str(p) for p in ports_val)
-            else:
-                ports_str = str(ports_val)
-            if ports_str:
-                config_lines.append(f"{COLOR_BLUE}🔀 {ports_str}{COLOR_RESET}")
+        ports_display = format_ports_display(ports_val)
+        if ports_display:
+            config_lines.append(ports_display)
 
         # Get volumes from config or Docker mounts
         volumes_val = cfg.get("volumes")
@@ -619,7 +638,12 @@ def list_containers(config_file: str) -> None:
                         volume_list.append(mount)
 
         if volume_list:
-            for vol in volume_list:
+            # Sort volumes: mount volumes (with :) first, then excluded volumes (without :)
+            mount_volumes = [vol for vol in volume_list if ":" in str(vol)]
+            excluded_volumes = [vol for vol in volume_list if ":" not in str(vol)]
+            sorted_volumes = mount_volumes + excluded_volumes
+
+            for vol in sorted_volumes:
                 vol_str = str(vol)
                 if vol_str and not (
                     vol_str == "/var/run/docker.sock:/var/run/docker.sock"
@@ -631,7 +655,7 @@ def list_containers(config_file: str) -> None:
 
         if cfg.get("startup_cmd"):
             display_cmd = prettify_placeholder_path(cfg["startup_cmd"], project_path)
-            config_lines.append(f"{COLOR_YELLOW}▶ {display_cmd}{COLOR_RESET}")
+            config_lines.append(f"{COLOR_ORANGE}⚙️ {display_cmd}{COLOR_RESET}")
 
         created_display = ""
         raw_created = ""
@@ -806,20 +830,21 @@ def list_configs(config_file: str) -> None:
             config_lines.append(f"{COLOR_YELLOW}📁 {display_project_path}{COLOR_RESET}")
 
         ports_val = cfg.get("ports")
-        if ports_val:
-            if isinstance(ports_val, list):
-                ports_str = " ".join(str(p) for p in ports_val)
-            else:
-                ports_str = str(ports_val)
-            if ports_str:
-                config_lines.append(f"{COLOR_BLUE}🔀 {ports_str}{COLOR_RESET}")
+        ports_display = format_ports_display(ports_val)
+        if ports_display:
+            config_lines.append(ports_display)
 
         volumes_val = cfg.get("volumes")
         if volumes_val:
             volume_list = (
                 volumes_val if isinstance(volumes_val, list) else [volumes_val]
             )
-            for vol in volume_list:
+            # Sort volumes: mount volumes (with :) first, then excluded volumes (without :)
+            mount_volumes = [vol for vol in volume_list if ":" in str(vol)]
+            excluded_volumes = [vol for vol in volume_list if ":" not in str(vol)]
+            sorted_volumes = mount_volumes + excluded_volumes
+
+            for vol in sorted_volumes:
                 vol_str = str(vol)
                 if vol_str and not (
                     vol_str == "/var/run/docker.sock:/var/run/docker.sock"
@@ -831,7 +856,7 @@ def list_configs(config_file: str) -> None:
 
         if cfg.get("startup_cmd"):
             display_cmd = prettify_placeholder_path(cfg["startup_cmd"], project_path)
-            config_lines.append(f"{COLOR_YELLOW}▶ {display_cmd}{COLOR_RESET}")
+            config_lines.append(f"{COLOR_ORANGE}⚙️ {display_cmd}{COLOR_RESET}")
 
         raw_created = str(cfg.get("created_at", "")).strip()
         created_display = format_created_timestamp(raw_created)
