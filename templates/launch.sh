@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 set -e
 
-# Configuration variables - modify these as needed
+#################################### Configuration variables - modify these as needed ####################################
 CONTAINER_NAME="__PROJECT__"
-IMAGE=""
-PORTS=""
-VOLUMES=()                  # Additional volumes: VOLUMES=("/data:/data" "myvolume:/vol")
-STARTUP_CMD="./runnable.sh" # Container path (fdevc_setup/ mounted to /workspace)
-DOCKER_CMD=""               # Override: "podman", "docker -H host", etc.
-PERSIST="false"
-DOCKER_SOCKET="true"
-FORCE="false"
+DOCKER_CMD=""                           # Container runtime (default: docker)
+IMAGE=""                                # Docker image or Dockerfile path (overrides default image or ./fdevc.Dockerfile)
+PORTS=""                                # Docker ports (e.g. "8080:80 443")
+VOLUMES=()                              # Additional volumes: ("/data:/data" "virtual:/local")
+STARTUP_CMD="./fdevc_setup/runnable.sh" # Startup script auto-mounted into /workspace/fdevc_setup
+PERSIST="false"                         # Persist container (true/false)
+DOCKER_SOCKET="true"                    # Mount Docker socket (true/false)
+FORCE="false"                           # Force container creation (true/false)
+##########################################################################################################################
 
 # Internal variables
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FDEVC="${FDEVC:-${HOME}/.fdevc/fdevc.sh}"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Resolve fdevc command invocation
 FDEVC_CMD=()
@@ -39,8 +40,8 @@ FDEVC_ARGS=()
 [ "$PERSIST" = "true" ] && FDEVC_ARGS+=(-d) || FDEVC_ARGS+=(--no-d)
 [ "$FORCE" = "true" ] && FDEVC_ARGS+=(-f)
 
-# Mount fdevc_setup to /workspace (skip auto project mount)
-FDEVC_ARGS+=(--no-v-dir -v "${PROJECT_DIR}/fdevc_setup:/workspace")
+# Mount fdevc_setup into /workspace (skip auto project mount)
+FDEVC_ARGS+=(--no-v-dir -v "${PROJECT_DIR}/fdevc_setup:/workspace/fdevc_setup")
 
 # Add custom volumes
 for vol in "${VOLUMES[@]}"; do

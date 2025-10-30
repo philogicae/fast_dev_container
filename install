@@ -283,8 +283,9 @@ EOF
 		if source "${FDEVC}" 2>/dev/null; then
 			log_success "fdevc command is ready"
 		else
-			log_warning "Could not auto-load fdevc"
-			log_detail "Run: export FDEVC=\"$HOME/.fdevc/fdevc.sh\"; source $FDEVC"
+			echo ""
+			log_warning "Could not auto-load fdevc, run:"
+			log_highlight "${BOLD}${RED}source $HOME/.fdevc/fdevc.sh${RESET}"
 		fi
 	fi
 

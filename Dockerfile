@@ -206,7 +206,7 @@ RUN if [ "${RUST_INSTALL}" != "false" ]; then \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     --default-toolchain "${TOOLCHAIN}" \
     --profile minimal \
-    --component rustfmt,clippy,rust-analyzer \
+    --component rustfmt,clippy,rust-analyzer,rust-src \
     && chmod -R a+w /usr/local/rustup /usr/local/cargo; \
     fi
 
