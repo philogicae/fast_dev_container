@@ -37,7 +37,13 @@ _check_dependencies() {
 }
 
 # shellcheck disable=SC2317
-if ! _check_dependencies; then return 1 2>/dev/null || exit 1; fi
+if ! _check_dependencies; then 
+    if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+        return 1
+    else
+        exit 1
+    fi
+fi
 
 # Color and styling helpers
 _c_reset="\033[0m"
@@ -81,6 +87,7 @@ _docker_exec() {
     else
         read -r -a docker_parts <<< "${docker_cmd}"
     fi
+    # Execute with proper error propagation
     "${docker_parts[@]}" "$@"
 }
 _get_container_name() {
@@ -113,12 +120,13 @@ _container_running() {
 
 _container_status() {
     local container_name="$1" docker_cmd="${2:-${FDEVC_DOCKER}}"
-    if _container_running "${container_name}" "${docker_cmd}"; then
-        echo "running"
-    elif _container_exists "${container_name}" "${docker_cmd}"; then
-        echo "stopped"
-    else
+    status_info=$(_docker_exec "${docker_cmd}" ps -a --filter "name=^${container_name}$" --format '{{.Status}}' 2>/dev/null)
+    if [[ -z "${status_info}" ]]; then
         echo "missing"
+    elif [[ "${status_info}" == Up* ]]; then
+        echo "running"
+    else
+        echo "stopped"
     fi
 }
 
@@ -434,8 +442,8 @@ _build_port_flags() {
     echo "$1" | tr ' ' '\n' | while read -r port; do
         [[ -z "$port" ]] && continue
         echo "-p"
-        if [[ "${port}" == *:* ]]; then
-            echo "${port}"
+        if [[ "$port" == *:* ]]; then
+            echo "$port"
         else
             echo "${port}:${port}"
         fi
@@ -727,11 +735,30 @@ _remove_container() {
 }
 
 _fdevc_start() {
-    local container_arg="" ports_override="" image_override="" docker_cmd_override="" detach=false remove_on_exit=false
-    local no_dir=false no_socket=false force_new=false force_recreate=false vm_mode=false no_v_dir=false
-    local startup_cmd_once="" startup_cmd_save="" startup_cmd_save_flag=false ignore_startup_cmd=false
-    local detach_user_set=false
-    local copy_config_from="" custom_basename=""
+    local container_arg ports_override image_override docker_cmd_override detach remove_on_exit
+    container_arg=""
+    ports_override=""
+    image_override=""
+    docker_cmd_override=""
+    detach=false
+    remove_on_exit=false
+    local no_dir no_socket force_new force_recreate vm_mode no_v_dir
+    no_dir=false
+    no_socket=false
+    force_new=false
+    force_recreate=false
+    vm_mode=false
+    no_v_dir=false
+    local startup_cmd_once startup_cmd_save startup_cmd_save_flag ignore_startup_cmd
+    startup_cmd_once=""
+    startup_cmd_save=""
+    startup_cmd_save_flag=false
+    ignore_startup_cmd=false
+    local detach_user_set
+    detach_user_set=false
+    local copy_config_from custom_basename
+    copy_config_from=""
+    custom_basename=""
     local volumes_override=()
     local has_tty=true
     [[ ! -t 0 || ! -t 1 ]] && has_tty=false
@@ -1164,7 +1191,8 @@ _fdevc_start() {
         if [[ ! -f "${image}" ]] && ! _docker_exec "${docker_cmd}" images -q "${image}" 2>/dev/null | grep -q .; then
             _msg_detail "Pulling image layers"
         fi
-        local error_output="" run_output_file=""
+        local error_output run_output_file
+        error_output=""
         run_output_file=$(mktemp -t fdevc-run-XXXX 2>/dev/null || printf '/tmp/fdevc-run-%s' "$$")
         local exit_code
         if [[ -n "${ZSH_VERSION-}" ]]; then
@@ -1270,7 +1298,9 @@ _fdevc_vm() {
 }
 
 _fdevc_stop() {
-    local container_arg="" docker_cmd_override=""
+    local container_arg docker_cmd_override
+    container_arg=""
+    docker_cmd_override=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1290,7 +1320,11 @@ _fdevc_stop() {
 }
 
 _fdevc_rm() {
-    local force=false delete_all=false container_arg="" docker_cmd_override=""
+    local force delete_all container_arg docker_cmd_override
+    force=false
+    delete_all=false
+    container_arg=""
+    docker_cmd_override=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1599,7 +1633,6 @@ _fdevc_ls() {
     local output=""
     while IFS= read -r name; do
         [[ -z "${name}" ]] && continue
-        local container_status image mounts_json socket_label created_at
         container_status=$(_docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^${name}$" --format '{{.Status}}' 2>/dev/null)
         image=$(_docker_exec "${FDEVC_DOCKER}" ps -a --filter "name=^${name}$" --format '{{.Image}}' 2>/dev/null)
         mounts_json=$(_docker_exec "${FDEVC_DOCKER}" inspect "${name}" --format '{{json .Mounts}}' 2>/dev/null)
