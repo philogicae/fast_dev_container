@@ -1,4 +1,4 @@
-## [unreleased]
+## [1.0.1] - 2025-10-30
 
 ### 🚀 Features
 
@@ -7,6 +7,10 @@
 ### 🐛 Bug Fixes
 
 - Improve container status checks and variable initialization
+
+### 📚 Documentation
+
+- Update changelog with volume and container improvements
 ## [1.0.0] - 2025-10-30
 
 ### 🚀 Features
