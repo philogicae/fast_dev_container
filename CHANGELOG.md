@@ -2,6 +2,15 @@
 
 ### 🚀 Features
 
+- Enhance volume display and sorting in container listings
+
+### 🐛 Bug Fixes
+
+- Improve container status checks and variable initialization
+## [1.0.0] - 2025-10-30
+
+### 🚀 Features
+
 - Enhance development container with improved tooling and UX
 - Improve shell detection and config file handling
 - Enhance installation and documentation
@@ -45,6 +54,7 @@
 - Update changelog with recent improvements and fixes
 - Update changelog with Docker and CI improvements
 - Update changelog with latest CI/CD and Docker improvements
+- Update changelog with latest CI/CD and Docker enhancements
 
 ### ⚙️ Miscellaneous Tasks
 
