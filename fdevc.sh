@@ -829,7 +829,7 @@ _fdevc_start() {
     fi
 
     local overrides_supplied=false
-    [[ -n "${ports_override}" || -n "${image_override}" || -n "${docker_cmd_override}" ]] && overrides_supplied=true
+    [[ -n "${ports_override}" || -n "${image_override}" || -n "${docker_cmd_override}" || ${#volumes_override[@]} -gt 0 ]] && overrides_supplied=true
     local container_running=false
     local container_was_running=false
     local image_to_remove_after_create=""
@@ -1029,45 +1029,140 @@ _fdevc_start() {
         fi
     fi
     local config_differs=false
-    if [[ "${force_recreate}" == true ]]; then
+    local config_changes=()
+    if [[ "${container_exists}" == true && ("${force_recreate}" == true || "${overrides_supplied}" == true) ]]; then
         local saved_config
         saved_config="$(_load_config "${container_name}")"
         if [[ -n "${saved_config}" && "${saved_config}" != "{}" ]]; then
-            local saved_ports saved_image saved_docker_cmd saved_project_path saved_socket_state
+            local saved_ports saved_image saved_docker_cmd saved_project_path saved_socket_state saved_volumes
             saved_ports=$(_get_config_value "${saved_config}" "ports" "")
             saved_image=$(_get_config_value "${saved_config}" "image" "")
             saved_docker_cmd=$(_get_config_value "${saved_config}" "docker_cmd" "")
             saved_project_path=$(_get_config_value "${saved_config}" "project_path" "")
             saved_socket_state=$(_get_config_value "${saved_config}" "socket" "")
-            if [[ "${saved_ports}" != "${ports}" || "${saved_image}" != "${image_config}" || "${saved_docker_cmd}" != "${docker_cmd}" || "${saved_project_path}" != "${desired_project_to_save}" || "${saved_socket_state}" != "${desired_socket_to_save}" ]]; then
-                config_differs=true
+            saved_volumes=$(_get_config_value "${saved_config}" "volumes" "")
+            local normalized_volumes_to_save=""
+            if [[ -n "${volumes_to_save}" ]]; then
+                local volume_list=()
+                if [[ -n "${ZSH_VERSION-}" ]]; then
+                    IFS='|||' read -rA volume_list <<< "${volumes_to_save}"
+                else
+                    IFS='|||' read -r -a volume_list <<< "${volumes_to_save}"
+                fi
+                local collapsed_vol_list=()
+                for vol in "${volume_list[@]}"; do
+                    [[ -z "${vol}" || "${vol}" == "/var/run/docker.sock:/var/run/docker.sock" ]] && continue
+                    local normalized_vol
+                    normalized_vol=$(_normalize_volume_name "${vol}" "${container_name}" "${project_path}")
+                    local collapsed_vol
+                    collapsed_vol=$(_collapse_volume "${normalized_vol}" "${project_path}")
+                    collapsed_vol_list+=("${collapsed_vol}")
+                done
+                local mount_volumes=()
+                local excluded_volumes=()
+                for vol in "${collapsed_vol_list[@]}"; do
+                    if [[ "${vol}" == *:* ]]; then
+                        mount_volumes+=("${vol}")
+                    else
+                        excluded_volumes+=("${vol}")
+                    fi
+                done
+                local sorted_volumes=("${mount_volumes[@]}" "${excluded_volumes[@]}")
+                if [[ ${#sorted_volumes[@]} -gt 0 ]]; then
+                    local first=true
+                    for vol in "${sorted_volumes[@]}"; do
+                        if [[ "${first}" == true ]]; then
+                            normalized_volumes_to_save="${vol}"
+                            first=false
+                        else
+                            normalized_volumes_to_save="${normalized_volumes_to_save}|||${vol}"
+                        fi
+                    done
+                fi
             fi
+            local normalized_saved_volumes=""
+            if [[ -n "${saved_volumes}" ]]; then
+                local saved_volume_list=()
+                if [[ -n "${ZSH_VERSION-}" ]]; then
+                    IFS='|||' read -rA saved_volume_list <<< "${saved_volumes}"
+                else
+                    IFS='|||' read -r -a saved_volume_list <<< "${saved_volumes}"
+                fi
+                local saved_collapsed_vol_list=()
+                for vol in "${saved_volume_list[@]}"; do
+                    [[ -z "${vol}" || "${vol}" == "/var/run/docker.sock:/var/run/docker.sock" ]] && continue
+                    local normalized_vol
+                    normalized_vol=$(_normalize_volume_name "${vol}" "${container_name}" "${project_path}")
+                    local collapsed_vol
+                    collapsed_vol=$(_collapse_volume "${normalized_vol}" "${project_path}")
+                    saved_collapsed_vol_list+=("${collapsed_vol}")
+                done
+                local saved_mount_volumes=()
+                local saved_excluded_volumes=()
+                for vol in "${saved_collapsed_vol_list[@]}"; do
+                    if [[ "${vol}" == *:* ]]; then
+                        saved_mount_volumes+=("${vol}")
+                    else
+                        saved_excluded_volumes+=("${vol}")
+                    fi
+                done
+                local saved_sorted_volumes=("${saved_mount_volumes[@]}" "${saved_excluded_volumes[@]}")
+                if [[ ${#saved_sorted_volumes[@]} -gt 0 ]]; then
+                    local first=true
+                    for vol in "${saved_sorted_volumes[@]}"; do
+                        if [[ "${first}" == true ]]; then
+                            normalized_saved_volumes="${vol}"
+                            first=false
+                        else
+                            normalized_saved_volumes="${normalized_saved_volumes}|||${vol}"
+                        fi
+                    done
+                fi
+            fi
+            local normalized_ports=""
+            local normalized_saved_ports=""
+            if [[ -n "${ports}" ]]; then
+                normalized_ports=$(echo "${ports}" | tr ' ' '\n' | grep -v '^$' | while read -r p; do [[ "$p" == *:* ]] && echo "$p" || echo "$p:$p"; done | sort -u | tr '\n' ' ' | sed 's/ $//')
+            fi
+            if [[ -n "${saved_ports}" ]]; then
+                normalized_saved_ports=$(echo "${saved_ports}" | tr ' ' '\n' | grep -v '^$' | while read -r p; do [[ "$p" == *:* ]] && echo "$p" || echo "$p:$p"; done | sort -u | tr '\n' ' ' | sed 's/ $//')
+            fi
+            [[ "${normalized_saved_ports}" != "${normalized_ports}" ]] && config_changes+=("ports")
+            [[ "${saved_image}" != "${image_config}" ]] && config_changes+=("image")
+            [[ "${saved_docker_cmd}" != "${docker_cmd}" ]] && config_changes+=("docker")
+            [[ "${saved_project_path}" != "${desired_project_to_save}" ]] && config_changes+=("project")
+            [[ "${saved_socket_state}" != "${desired_socket_to_save}" ]] && config_changes+=("socket")
+            [[ "${normalized_saved_volumes}" != "${normalized_volumes_to_save}" ]] && config_changes+=("volumes")
+            [[ ${#config_changes[@]} -gt 0 ]] && config_differs=true
         else
-            if [[ "${overrides_supplied}" == true || "${no_socket}" == true || "${no_dir}" == true ]]; then
-                config_differs=true
-            fi
+            config_differs=true
         fi
     fi
-
+    local overrides_ignored=false
     if [[ "${container_exists}" == true ]]; then
         local should_recreate=false
         if [[ "${force_recreate}" == true && "${config_differs}" == true ]]; then
             should_recreate=true
-        elif [[ "${overrides_supplied}" == true ]]; then
-            if [[ "${container_running}" == true ]]; then
-                _msg_info "Running $(_format_container_title "${container_name}"); overrides ignored. Use --new/-f or stop first."
-                overrides_supplied=false
-            else
-                should_recreate=true
-            fi
+        elif [[ "${force_recreate}" == true && "${config_differs}" == false ]]; then
+            _msg_info "Container settings unchanged; skipping recreation"
+        elif [[ "${overrides_supplied}" == true && "${container_running}" == true && "${config_differs}" == true ]]; then
+            _msg_info "Running $(_format_container_title "${container_name}"); overrides ignored. Use --new/-f or stop first."
+            overrides_ignored=true
+        elif [[ "${overrides_supplied}" == true && "${config_differs}" == true ]]; then
+            should_recreate=true
         fi
-
         if [[ "${should_recreate}" == true ]]; then
             image_to_remove_after_create="$(_container_image_name "${container_name}" "${docker_cmd}")"
+            local changes_msg=""
+            if [[ ${#config_changes[@]} -gt 0 ]]; then
+                local changes_str
+                changes_str=$(IFS=', '; echo "${config_changes[*]}")
+                changes_msg=" (${changes_str})"
+            fi
             if [[ "${container_running}" == true ]]; then
-                _msg_info "Recreating $(_format_container_title "${container_name}") (remove running container)"
+                _msg_info "Recreating $(_format_container_title "${container_name}")${changes_msg}"
             else
-                _msg_info "Recreating $(_format_container_title "${container_name}") with new settings"
+                _msg_info "Recreating $(_format_container_title "${container_name}") with new settings${changes_msg}"
             fi
             if ! _docker_exec "${docker_cmd}" rm -f "${container_name}" >/dev/null 2>&1; then
                 _msg_error "Failed to recreate container with new settings"
@@ -1095,7 +1190,7 @@ _fdevc_start() {
     fi
 
     if [[ "${container_exists}" == true ]]; then
-        if [[ "${remove_on_exit}" != true ]]; then
+        if [[ "${remove_on_exit}" != true && "${overrides_ignored}" != true ]]; then
             local created_at_current_save
             created_at_current_save="$(_container_created_at "${container_name}" "${docker_cmd}")"
             _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "${created_at_current_save}" "${persist_to_save}" "${volumes_to_save}"

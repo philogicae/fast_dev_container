@@ -29,10 +29,23 @@ def visible_length(text: str) -> int:
     return len(ANSI_ESCAPE_RE.sub("", text))
 
 
-def pad_to_width(text: str, target_width: int) -> str:
+def pad_to_width(text: str, target_width: int, align_right: bool = False) -> str:
     """Pad a text (with ANSI codes) to the target visible width."""
     extra = target_width - visible_length(text)
-    return f"{text}{' ' * extra}" if extra > 0 else text
+    if extra > 0:
+        if align_right:
+            return f"{' ' * extra}{text}"
+        else:
+            return f"{text}{' ' * extra}"
+    return text
+
+
+def align_colored_text(
+    text: str, color: str, width: int, align_right: bool = False
+) -> str:
+    """Apply color to text and align it properly within the given width."""
+    colored_text = f"{color}{text}{COLOR_RESET}"
+    return pad_to_width(colored_text, width, align_right=align_right)
 
 
 def collapse_home_path(path: str) -> str:
@@ -643,7 +656,11 @@ def list_containers(config_file: str) -> None:
             excluded_volumes = [vol for vol in volume_list if ":" not in str(vol)]
             sorted_volumes = mount_volumes + excluded_volumes
 
-            for vol in sorted_volumes:
+            # Filter out excluded volumes from display and count them
+            display_volumes = [vol for vol in sorted_volumes if ":" in str(vol)]
+            excluded_count = len(excluded_volumes)
+
+            for vol in display_volumes:
                 vol_str = str(vol)
                 if vol_str and not (
                     vol_str == "/var/run/docker.sock:/var/run/docker.sock"
@@ -652,6 +669,12 @@ def list_containers(config_file: str) -> None:
                     formatted_vol = format_volume_display(vol_str, project_path, name)
                     if formatted_vol:
                         config_lines.append(f"💾 {formatted_vol}")
+
+            # Show excluded count if there are any excluded volumes
+            if excluded_count > 0:
+                config_lines.append(
+                    f"⛔ -> {COLOR_RED}{excluded_count} excluded paths{COLOR_RESET}"
+                )
 
         if cfg.get("startup_cmd"):
             display_cmd = prettify_placeholder_path(cfg["startup_cmd"], project_path)
@@ -670,18 +693,29 @@ def list_containers(config_file: str) -> None:
         rows.append((str(idx), name, created_display, status_display, config_lines))
 
     idx_width = max(len("#"), max(len(row[0]) for row in rows))
-    name_width = max(
-        NAME_MIN_WIDTH, len("FAST DEV CONTAINERS"), max(len(row[1]) for row in rows)
-    )
-    created_width = max(len("CREATED"), max(len(row[2]) for row in rows))
+    created_width = max(len("CREATED"), max(len(row[2]) for row in rows), 16)
     status_width = max(len("STATUS"), max(len(row[3]) for row in rows))
 
-    header_prefix = f"{'#':<{idx_width}}  {'FAST DEV CONTAINERS':<{name_width}}  "
-    header_created = "CREATED".rjust(created_width)
-    header_status = "STATUS".rjust(status_width)
-    header_text = header_prefix + header_created + "  " + header_status
+    max_name_width = max(len("FAST DEV CONTAINERS"), max(len(row[1]) for row in rows))
+    max_config_width = 0
+    for row in rows:
+        for line in row[4]:
+            max_config_width = max(max_config_width, visible_length(line))
 
-    table_width = visible_length(header_text)
+    name_width = max(
+        NAME_MIN_WIDTH,
+        max_name_width,
+        max_config_width - idx_width - created_width - status_width - 2,
+    )
+
+    table_width = idx_width + 2 + name_width + 2 + created_width + 2 + status_width
+
+    header_idx = f"{'#':<{idx_width}}"
+    header_name = f"{'FAST DEV CONTAINERS':<{name_width}}"
+    header_created = f"{'CREATED':>{created_width}}"
+    header_status = f"{'STATUS':>{status_width}}"
+    header_text = f"{header_idx}  {header_name}  {header_created}  {header_status}"
+
     rendered_rows = []
 
     for row in rows:
@@ -694,50 +728,34 @@ def list_containers(config_file: str) -> None:
         else:
             status_color = COLOR_DIM
 
-        status_plain = row_status.strip().rjust(status_width)
-        status_colored = f"{status_color}{status_plain}{COLOR_RESET}"
-
-        name_colored = f"{COLOR_BOLD}{row_name.ljust(name_width)}{COLOR_RESET}"
-        created_plain = row_created.strip().rjust(created_width)
-        created_colored = f"{COLOR_DIM}{created_plain}{COLOR_RESET}"
-        prefix = f"{row_idx:<{idx_width}}  {name_colored}  {created_colored}  "
-        table_width = max(
-            table_width,
-            visible_length(prefix) + visible_length(status_plain),
+        idx_aligned = f"{row_idx:<{idx_width}}"
+        name_aligned = f"{row_name:<{name_width}}"
+        created_aligned = align_colored_text(
+            row_created, COLOR_DIM, created_width, align_right=True
         )
+        status_aligned = align_colored_text(
+            row_status, status_color, status_width, align_right=True
+        )
+
+        idx_colored = f"{COLOR_DIM}{idx_aligned}{COLOR_RESET}"
+        name_colored = f"{COLOR_BOLD}{name_aligned}{COLOR_RESET}"
+
+        row_line = f"{idx_colored}  {name_colored}  {created_aligned}  {status_aligned}"
 
         rendered_config = []
         for line in row_config:
             config_line = f"    {line}"
-            table_width = max(table_width, visible_length(config_line))
             rendered_config.append(config_line)
 
-        rendered_rows.append((prefix, status_colored, rendered_config))
+        rendered_rows.append((row_line, rendered_config))
 
-    table_width = max(table_width, visible_length(header_text)) + HEADER_EXTRA_PADDING
-
-    # Print header aligned to table width
-    header_spacing = max(
-        0,
-        table_width
-        - visible_length(header_prefix)
-        - visible_length(header_created)
-        - 2
-        - visible_length(header_status),
-    )
-    header_line = header_prefix + header_created + " " * header_spacing + header_status
-    header_line = pad_to_width(header_line, table_width)
-    print(f"{COLOR_BOLD}{COLOR_CYAN}{header_line}{COLOR_RESET}")
+    print(f"{COLOR_BOLD}{COLOR_CYAN}{header_text}{COLOR_RESET}")
     print(f"{COLOR_DIM}{'─' * table_width}{COLOR_RESET}")
 
-    for prefix, status_colored, config_lines in rendered_rows:
-        spacing = max(
-            0, table_width - visible_length(prefix) - visible_length(status_colored)
-        )
-        main_line = prefix + " " * spacing + status_colored
-        print(pad_to_width(main_line, table_width))
-        for line in config_lines:
-            print(pad_to_width(line, table_width))
+    for row_line, rendered_config in rendered_rows:
+        print(row_line)
+        for config_line in rendered_config:
+            print(config_line)
 
 
 def resolve_index(config_file: str, index_str: str) -> None:
@@ -863,57 +881,54 @@ def list_configs(config_file: str) -> None:
 
         rows.append((str(idx), name, created_display, config_lines))
 
-    # Calculate widths
     config_header = collapse_home_path(config_file) if config_file else "CONFIGURATIONS"
-
     idx_width = max(len("#"), max(len(row[0]) for row in rows))
+    created_width = max(len("CREATED"), max(len(row[2]) for row in rows), 16)
+
+    max_name_width = max(len(config_header), max(len(row[1]) for row in rows))
+    max_config_width = 0
+    for row in rows:
+        for line in row[3]:
+            max_config_width = max(max_config_width, visible_length(line))
+
     name_width = max(
-        NAME_MIN_WIDTH, len(config_header), max(len(row[1]) for row in rows)
+        NAME_MIN_WIDTH, max_name_width, max_config_width - idx_width - created_width - 4
     )
-    created_width = max(len("CREATED"), max(len(row[2]) for row in rows))
 
-    header_prefix = f"{'#':<{idx_width}}  {config_header:<{name_width}}  "
-    header_created = "CREATED".rjust(created_width)
-    header_text = header_prefix + header_created
+    table_width = idx_width + 2 + name_width + 2 + created_width
 
-    table_width = visible_length(header_text)
+    header_idx = f"{'#':<{idx_width}}"
+    header_name = f"{config_header:<{name_width}}"
+    header_created = f"{'CREATED':>{created_width}}"
+    header_text = f"{header_idx}  {header_name}  {header_created}"
+
     rendered_rows = []
 
     for row in rows:
         row_idx, row_name, row_created, row_config = row
 
-        name_colored = f"{COLOR_BOLD}{row_name.ljust(name_width)}{COLOR_RESET}"
-        created_plain = row_created.strip().rjust(created_width)
-        created_colored = f"{COLOR_DIM}{created_plain}{COLOR_RESET}"
+        idx_aligned = f"{row_idx:<{idx_width}}"
+        name_aligned = f"{row_name:<{name_width}}"
+        created_aligned = align_colored_text(
+            row_created, COLOR_DIM, created_width, align_right=True
+        )
+
+        idx_colored = f"{COLOR_DIM}{idx_aligned}{COLOR_RESET}"
+        name_colored = f"{COLOR_BOLD}{name_aligned}{COLOR_RESET}"
+
+        row_line = f"{idx_colored}  {name_colored}  {created_aligned}"
 
         rendered_config = []
         for line in row_config:
             config_line = f"    {line}"
-            table_width = max(table_width, visible_length(config_line))
             rendered_config.append(config_line)
 
-        rendered_rows.append((row_idx, name_colored, created_colored, rendered_config))
+        rendered_rows.append((row_line, rendered_config))
 
-    table_width = max(table_width, visible_length(header_text)) + HEADER_EXTRA_PADDING
-
-    # Print header with proper spacing
-    header_spacing = max(
-        0, table_width - visible_length(header_prefix) - visible_length(header_created)
-    )
-    header_line = header_prefix + " " * header_spacing + header_created
-    header_line = pad_to_width(header_line, table_width)
-    print(f"{COLOR_BOLD}{COLOR_CYAN}{header_line}{COLOR_RESET}")
+    print(f"{COLOR_BOLD}{COLOR_CYAN}{header_text}{COLOR_RESET}")
     print(f"{COLOR_DIM}{'─' * table_width}{COLOR_RESET}")
 
-    # Print rows with proper spacing
-    for row_idx, name_colored, created_colored, rendered_config in rendered_rows:
-        # Build row with spacing to align created column to the right
-        row_prefix = f"{row_idx:<{idx_width}}  {name_colored}  "
-        row_spacing = max(
-            0,
-            table_width - visible_length(row_prefix) - visible_length(created_colored),
-        )
-        row_line = row_prefix + " " * row_spacing + created_colored
+    for row_line, rendered_config in rendered_rows:
         print(row_line)
         for config_line in rendered_config:
             print(config_line)
