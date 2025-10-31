@@ -1,3 +1,12 @@
+## [1.0.2] - 2025-10-31
+
+### 🚀 Features
+
+- Improve container configuration handling and table display
+
+### ⚙️ Miscellaneous Tasks
+
+- Release version 1.0.1
 ## [1.0.1] - 2025-10-30
 
 ### 🚀 Features
