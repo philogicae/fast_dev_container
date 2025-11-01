@@ -1,3 +1,12 @@
+## [1.0.3] - 2025-11-01
+
+### 🚀 Features
+
+- Enhance container management and configuration display
+
+### 📚 Documentation
+
+- Update changelog for version 1.0.2
 ## [1.0.2] - 2025-10-31
 
 ### 🚀 Features
