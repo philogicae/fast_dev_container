@@ -1,3 +1,12 @@
+## [unreleased]
+
+### 🚀 Features
+
+- Simplify project structure visualization in README
+
+### 📚 Documentation
+
+- Update changelog for version 1.0.3
 ## [1.0.3] - 2025-11-01
 
 ### 🚀 Features
