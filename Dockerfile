@@ -101,6 +101,7 @@ RUN apt-get update \
     lsof \
     strace \
     less \
+    rsync \
     # JSON/YAML tools
     jq \
     # SSH client

@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
 set -e
 
+# Directories
+WORKSPACE_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="${WORKSPACE_DIR}/project"
+mkdir -p "${PROJECT_DIR}"
+
 #################################### Configuration variables - modify these as needed ####################################
 CONTAINER_NAME="__PROJECT__"
 DOCKER_CMD=""                           # Container runtime (default: docker)
 IMAGE=""                                # Docker image or Dockerfile path (overrides default image or ./fdevc.Dockerfile)
-PORTS=""                                # Docker ports (e.g. "8080:80 443")
-VOLUMES=()                              # Additional volumes: ("/data:/data" "virtual:/local")
-STARTUP_CMD="./fdevc_setup/runnable.sh" # Startup script auto-mounted into /workspace/fdevc_setup
-PERSIST="false"                         # Persist container (true/false)
-DOCKER_SOCKET="true"                    # Mount Docker socket (true/false)
+SOCKET="true"                           # Mount Docker socket (true/false)
+PERSIST="false"                         # Keep container running on exit (true/false)
 FORCE="false"                           # Force container creation (true/false)
+PORTS=""                                # Docker ports (e.g. "8080:80 443")
+STARTUP_CMD="./fdevc_setup/runnable.sh" # Startup script auto-mounted into /workspace/fdevc_setup
+VOLUMES=( # Additional volumes ("/data:/data" "virtual:/local")
+	"${WORKSPACE_DIR}/fdevc_setup:/workspace/fdevc_setup" # fdevc_setup
+	"${PROJECT_DIR}:/workspace/project")                  # Working directory
+EXCLUDED=()                                            # Excluded volumes ("/workspace/project/node_modules")
 ##########################################################################################################################
 
-# Internal variables
-FDEVC="${FDEVC:-${HOME}/.fdevc/fdevc.sh}"
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
 # Resolve fdevc command invocation
+FDEVC="${FDEVC:-${HOME}/.fdevc/fdevc.sh}"
 FDEVC_CMD=()
 FDEVC_SOURCE=""
 if command -v fdevc >/dev/null 2>&1; then
@@ -34,18 +39,23 @@ fi
 FDEVC_ARGS=()
 [ -n "$DOCKER_CMD" ] && FDEVC_ARGS+=(--dkr "$DOCKER_CMD")
 [ -n "$IMAGE" ] && FDEVC_ARGS+=(-i "$IMAGE")
-[ -n "$PORTS" ] && FDEVC_ARGS+=(-p "$PORTS")
-[ -n "$STARTUP_CMD" ] && FDEVC_ARGS+=(--c-s "$STARTUP_CMD")
-[ "$DOCKER_SOCKET" != "true" ] && FDEVC_ARGS+=(--no-s)
+[ "$SOCKET" != "true" ] && FDEVC_ARGS+=(--no-s)
 [ "$PERSIST" = "true" ] && FDEVC_ARGS+=(-d) || FDEVC_ARGS+=(--no-d)
 [ "$FORCE" = "true" ] && FDEVC_ARGS+=(-f)
+[ -n "$PORTS" ] && FDEVC_ARGS+=(-p "$PORTS")
+[ -n "$STARTUP_CMD" ] && FDEVC_ARGS+=(--c-s "$STARTUP_CMD")
 
-# Mount fdevc_setup into /workspace (skip auto project mount)
-FDEVC_ARGS+=(--no-v-dir -v "${PROJECT_DIR}/fdevc_setup:/workspace/fdevc_setup")
+# Don't mount root directory
+FDEVC_ARGS+=(--no-v-dir)
 
 # Add custom volumes
 for vol in "${VOLUMES[@]}"; do
 	[ -n "$vol" ] && FDEVC_ARGS+=(-v "$vol")
+done
+
+# Add excluded volumes
+for excl in "${EXCLUDED[@]}"; do
+	[ -n "$excl" ] && FDEVC_ARGS+=(-v "$excl")
 done
 
 # Resolve container name

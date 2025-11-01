@@ -362,6 +362,12 @@ _attach_session() {
     return 0
 }
 
+_normalize_volumes_for_comparison() {
+    local volumes="$1" container_name="$2" project_path="$3"
+    # Delegate to Python for consistent normalization
+    ${FDEVC_PYTHON} "${UTILS_PY}" normalize_volumes "${volumes}" "${container_name}" "${project_path}" 2>/dev/null
+}
+
 _save_config() {
     local container_name="$1"
     local ports="$2"
@@ -404,6 +410,7 @@ _save_config() {
         done
         
         # Sort volumes: mount volumes (with :) first, then excluded volumes (without :)
+        # Sort alphabetically within each group to match Python normalization
         local mount_volumes=()
         local excluded_volumes=()
         for vol in "${collapsed_vol_list[@]}"; do
@@ -413,7 +420,32 @@ _save_config() {
                 excluded_volumes+=("${vol}")
             fi
         done
-        local sorted_volumes=("${mount_volumes[@]}" "${excluded_volumes[@]}")
+        
+        # Sort each group alphabetically (use LC_ALL=C for consistent ASCII sorting like Python)
+        local sorted_mount_volumes=()
+        local sorted_excluded_volumes=()
+        if [[ ${#mount_volumes[@]} -gt 0 ]]; then
+            if [[ -n "${ZSH_VERSION-}" ]]; then
+                # shellcheck disable=SC2296
+                sorted_mount_volumes=("${(@on)mount_volumes}")
+            else
+                # shellcheck disable=SC2207
+                IFS=$'\n' sorted_mount_volumes=($(LC_ALL=C sort <<<"${mount_volumes[*]}"))
+                IFS=' '
+            fi
+        fi
+        if [[ ${#excluded_volumes[@]} -gt 0 ]]; then
+            if [[ -n "${ZSH_VERSION-}" ]]; then
+                # shellcheck disable=SC2296
+                sorted_excluded_volumes=("${(@on)excluded_volumes}")
+            else
+                # shellcheck disable=SC2207
+                IFS=$'\n' sorted_excluded_volumes=($(LC_ALL=C sort <<<"${excluded_volumes[*]}"))
+                IFS=' '
+            fi
+        fi
+        
+        local sorted_volumes=("${sorted_mount_volumes[@]}" "${sorted_excluded_volumes[@]}")
         
         if [[ ${#sorted_volumes[@]} -gt 0 ]]; then
             local first=true
@@ -1028,112 +1060,33 @@ _fdevc_start() {
             volumes_to_save="${volumes_to_save}__PROJECT_PATH__:/workspace"
         fi
     fi
+    local normalized_volumes_display
+    normalized_volumes_display=$(_normalize_volumes_for_comparison "${volumes_to_save}" "${container_name}" "${project_path}")
     local config_differs=false
     local config_changes=()
+    local config_old_values=""
     if [[ "${container_exists}" == true && ("${force_recreate}" == true || "${overrides_supplied}" == true) ]]; then
-        local saved_config
-        saved_config="$(_load_config "${container_name}")"
-        if [[ -n "${saved_config}" && "${saved_config}" != "{}" ]]; then
-            local saved_ports saved_image saved_docker_cmd saved_project_path saved_socket_state saved_volumes
-            saved_ports=$(_get_config_value "${saved_config}" "ports" "")
-            saved_image=$(_get_config_value "${saved_config}" "image" "")
-            saved_docker_cmd=$(_get_config_value "${saved_config}" "docker_cmd" "")
-            saved_project_path=$(_get_config_value "${saved_config}" "project_path" "")
-            saved_socket_state=$(_get_config_value "${saved_config}" "socket" "")
-            saved_volumes=$(_get_config_value "${saved_config}" "volumes" "")
-            local normalized_volumes_to_save=""
-            if [[ -n "${volumes_to_save}" ]]; then
-                local volume_list=()
+        # Use Python to compare configs for consistency and to fix volume comparison
+        local comparison_result
+        comparison_result=$(${FDEVC_PYTHON} "${UTILS_PY}" compare_configs "${CONFIG_FILE}" "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${desired_socket_to_save}" "${normalized_volumes_display}" 2>/dev/null)
+        if [[ -n "${comparison_result}" ]]; then
+            local differs
+            differs=$(echo "${comparison_result}" | ${FDEVC_PYTHON} -c "import sys, json; data = json.load(sys.stdin); print('true' if data.get('differs', False) else 'false')" 2>/dev/null)
+            [[ "${differs}" == "true" ]] && config_differs=true
+            
+            # Extract changes array
+            local changes_json
+            changes_json=$(echo "${comparison_result}" | ${FDEVC_PYTHON} -c "import sys, json; data = json.load(sys.stdin); print(','.join(data.get('changes', [])))" 2>/dev/null)
+            if [[ -n "${changes_json}" ]]; then
                 if [[ -n "${ZSH_VERSION-}" ]]; then
-                    IFS='|||' read -rA volume_list <<< "${volumes_to_save}"
+                    IFS=',' read -rA config_changes <<< "${changes_json}"
                 else
-                    IFS='|||' read -r -a volume_list <<< "${volumes_to_save}"
-                fi
-                local collapsed_vol_list=()
-                for vol in "${volume_list[@]}"; do
-                    [[ -z "${vol}" || "${vol}" == "/var/run/docker.sock:/var/run/docker.sock" ]] && continue
-                    local normalized_vol
-                    normalized_vol=$(_normalize_volume_name "${vol}" "${container_name}" "${project_path}")
-                    local collapsed_vol
-                    collapsed_vol=$(_collapse_volume "${normalized_vol}" "${project_path}")
-                    collapsed_vol_list+=("${collapsed_vol}")
-                done
-                local mount_volumes=()
-                local excluded_volumes=()
-                for vol in "${collapsed_vol_list[@]}"; do
-                    if [[ "${vol}" == *:* ]]; then
-                        mount_volumes+=("${vol}")
-                    else
-                        excluded_volumes+=("${vol}")
-                    fi
-                done
-                local sorted_volumes=("${mount_volumes[@]}" "${excluded_volumes[@]}")
-                if [[ ${#sorted_volumes[@]} -gt 0 ]]; then
-                    local first=true
-                    for vol in "${sorted_volumes[@]}"; do
-                        if [[ "${first}" == true ]]; then
-                            normalized_volumes_to_save="${vol}"
-                            first=false
-                        else
-                            normalized_volumes_to_save="${normalized_volumes_to_save}|||${vol}"
-                        fi
-                    done
+                    IFS=',' read -r -a config_changes <<< "${changes_json}"
                 fi
             fi
-            local normalized_saved_volumes=""
-            if [[ -n "${saved_volumes}" ]]; then
-                local saved_volume_list=()
-                if [[ -n "${ZSH_VERSION-}" ]]; then
-                    IFS='|||' read -rA saved_volume_list <<< "${saved_volumes}"
-                else
-                    IFS='|||' read -r -a saved_volume_list <<< "${saved_volumes}"
-                fi
-                local saved_collapsed_vol_list=()
-                for vol in "${saved_volume_list[@]}"; do
-                    [[ -z "${vol}" || "${vol}" == "/var/run/docker.sock:/var/run/docker.sock" ]] && continue
-                    local normalized_vol
-                    normalized_vol=$(_normalize_volume_name "${vol}" "${container_name}" "${project_path}")
-                    local collapsed_vol
-                    collapsed_vol=$(_collapse_volume "${normalized_vol}" "${project_path}")
-                    saved_collapsed_vol_list+=("${collapsed_vol}")
-                done
-                local saved_mount_volumes=()
-                local saved_excluded_volumes=()
-                for vol in "${saved_collapsed_vol_list[@]}"; do
-                    if [[ "${vol}" == *:* ]]; then
-                        saved_mount_volumes+=("${vol}")
-                    else
-                        saved_excluded_volumes+=("${vol}")
-                    fi
-                done
-                local saved_sorted_volumes=("${saved_mount_volumes[@]}" "${saved_excluded_volumes[@]}")
-                if [[ ${#saved_sorted_volumes[@]} -gt 0 ]]; then
-                    local first=true
-                    for vol in "${saved_sorted_volumes[@]}"; do
-                        if [[ "${first}" == true ]]; then
-                            normalized_saved_volumes="${vol}"
-                            first=false
-                        else
-                            normalized_saved_volumes="${normalized_saved_volumes}|||${vol}"
-                        fi
-                    done
-                fi
-            fi
-            local normalized_ports=""
-            local normalized_saved_ports=""
-            if [[ -n "${ports}" ]]; then
-                normalized_ports=$(echo "${ports}" | tr ' ' '\n' | grep -v '^$' | while read -r p; do [[ "$p" == *:* ]] && echo "$p" || echo "$p:$p"; done | sort -u | tr '\n' ' ' | sed 's/ $//')
-            fi
-            if [[ -n "${saved_ports}" ]]; then
-                normalized_saved_ports=$(echo "${saved_ports}" | tr ' ' '\n' | grep -v '^$' | while read -r p; do [[ "$p" == *:* ]] && echo "$p" || echo "$p:$p"; done | sort -u | tr '\n' ' ' | sed 's/ $//')
-            fi
-            [[ "${normalized_saved_ports}" != "${normalized_ports}" ]] && config_changes+=("ports")
-            [[ "${saved_image}" != "${image_config}" ]] && config_changes+=("image")
-            [[ "${saved_docker_cmd}" != "${docker_cmd}" ]] && config_changes+=("docker")
-            [[ "${saved_project_path}" != "${desired_project_to_save}" ]] && config_changes+=("project")
-            [[ "${saved_socket_state}" != "${desired_socket_to_save}" ]] && config_changes+=("socket")
-            [[ "${normalized_saved_volumes}" != "${normalized_volumes_to_save}" ]] && config_changes+=("volumes")
-            [[ ${#config_changes[@]} -gt 0 ]] && config_differs=true
+            
+            # Extract old_values as JSON string
+            config_old_values=$(echo "${comparison_result}" | ${FDEVC_PYTHON} -c "import sys, json; data = json.load(sys.stdin); print(json.dumps(data.get('old_values', {})))" 2>/dev/null)
         else
             config_differs=true
         fi
@@ -1196,11 +1149,17 @@ _fdevc_start() {
             _save_config "${container_name}" "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${startup_cmd_to_save}" "${desired_socket_to_save}" "${created_at_current_save}" "${persist_to_save}" "${volumes_to_save}"
         fi
 
+        # Display configuration
+        local changes_str=""
+        if [[ ${#config_changes[@]} -gt 0 ]]; then
+            changes_str=$(IFS=','; echo "${config_changes[*]}")
+        fi
+        ${FDEVC_PYTHON} "${UTILS_PY}" format_config_display "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${desired_socket_to_save}" "${normalized_volumes_display}" "${changes_str}" "${config_old_values}" "${container_name}" 2>&1
+        
         if [[ "${container_running}" == true ]]; then
             _msg_info "Already running: $(_format_container_title "${container_name}")"
         else
             _msg_info "Starting $(_format_container_title "${container_name}")"
-            [[ -n "${ports}" ]] && _msg_detail "Ports: ${ports}"
             _msg_docker_cmd "${docker_cmd} start ${container_name}"
             local start_error exit_code
             start_error=$(_docker_exec "${docker_cmd}" start "${container_name}" 2>&1)
@@ -1245,15 +1204,19 @@ _fdevc_start() {
         local image
         image=$(_resolve_image "${image_config}" "${docker_cmd}" "${container_name}") || { _msg_error "Failed to resolve image"; return 1; }
 
-        _msg_info "Creating $(_format_container_title "${container_name}") (image: ${image})"
-        [[ -n "${ports}" ]] && _msg_detail "Ports: ${ports}"
+        _msg_info "Creating $(_format_container_title "${container_name}")"
+        # Display configuration
+        local changes_str=""
+        if [[ ${#config_changes[@]} -gt 0 ]]; then
+            changes_str=$(IFS=','; echo "${config_changes[*]}")
+        fi
+        ${FDEVC_PYTHON} "${UTILS_PY}" format_config_display "${ports}" "${image_config}" "${docker_cmd}" "${desired_project_to_save}" "${desired_socket_to_save}" "${normalized_volumes_display}" "${changes_str}" "${config_old_values}" "${container_name}" 2>&1
 
         local port_flags_arr=()
         while IFS= read -r line; do port_flags_arr+=("$line"); done < <(_build_port_flags "${ports}")
 
         local run_args=(-d --name "${container_name}")
         local socket_label="false"
-        local dirs_to_create=()
         if [[ -n "${volumes_to_save}" ]]; then
             local volume_list=()
             if [[ -n "${ZSH_VERSION-}" ]]; then
@@ -1266,13 +1229,6 @@ _fdevc_start() {
                 # shellcheck disable=SC2155
                 local normalized_vol=$(_normalize_volume_name "${vol}" "${container_name}" "${project_path}")
                 run_args+=(-v "${normalized_vol}")
-                local vol_source="${normalized_vol%%:*}"
-                # Only create directories for mount volumes (with destination), not excluded volumes
-                if [[ "${vol_source}" != /* && "${vol_source}" != ./* && "${normalized_vol}" == *:* && "${normalized_vol}" != *: ]]; then
-                    # Extract the container path
-                    local container_path="${normalized_vol#*:}"
-                    dirs_to_create+=("${container_path}")
-                fi
             done
         fi
         if [[ "${no_socket}" != true ]]; then
@@ -1312,13 +1268,6 @@ _fdevc_start() {
                 _msg_detail "Docker did not return additional details."
             fi
             return 1
-        fi
-        
-        # Create directories for virtual volumes
-        if [[ ${#dirs_to_create[@]} -gt 0 ]]; then
-            for dir_path in "${dirs_to_create[@]}"; do
-                _docker_exec "${docker_cmd}" exec "${container_name}" mkdir -p "${dir_path}" >/dev/null 2>&1 || true
-            done
         fi
         
         if [[ "${remove_on_exit}" != true ]]; then
@@ -1671,11 +1620,12 @@ _fdevc_gen() {
     echo -e "${_c_bold}${_c_cyan}📁 Current Location: ${_c_reset}${PWD}"
     echo -e "${_c_bold}${_c_cyan}📂 Structure:${_c_reset}"
     echo -e "  ${_c_dim}${project_name}/${_c_reset}"
-    echo -e "  ${_c_dim}├── README.md${_c_reset}"
-    echo -e "  ${_c_dim}├── install_and_run        # Installation script (curl one-liner)${_c_reset}"
+    echo -e "  ${_c_dim}├── README.md              # Project documentation${_c_reset}"
+    echo -e "  ${_c_dim}├── install_and_run        # Auto-install script (curl one-liner)${_c_reset}"
     echo -e "  ${_c_dim}├── launch.sh              # Container launcher with predefined settings${_c_reset}"
-    echo -e "  ${_c_dim}└── fdevc_setup/           # Folder mounted at /workspace/fdevc_setup in the container${_c_reset}"
-    echo -e "  ${_c_dim}    └── runnable.sh        # Main script that runs inside the container${_c_reset}"
+    echo -e "  ${_c_dim}├── project/               # Git project mount${_c_reset}"
+    echo -e "  ${_c_dim}└── fdevc_setup/           # Setup scripts mount${_c_reset}"
+    echo -e "  ${_c_dim}    └── runnable.sh        # Main container script${_c_reset}"
     echo ""
     echo -e "${_c_bold}${_c_cyan}Next steps:${_c_reset}"
     echo -e "  ${_c_bold}1. Replace${_c_reset} all ${_c_magenta}__USER__${_c_reset} with your ${_c_magenta}GitHub username${_c_reset} in the project"

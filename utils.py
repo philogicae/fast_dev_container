@@ -328,16 +328,32 @@ def format_ports_display(ports_val: Any) -> str:
 
 
 def format_volume_display(
-    volume: str, project_path: str | None, container_name: str | None = None
+    volume: str,
+    project_path: str | None,
+    container_name: str | None = None,
+    dim: bool = False,
 ) -> str:
     """Format a single volume mount for display with different colors by volume type."""
     if not volume:
         return volume
+
+    # Use dim colors if requested
+    source_bright_color = COLOR_YELLOW
+    source_named_color = COLOR_CYAN
+    dest_color = COLOR_PINK
+    excluded_color = COLOR_RED
+
+    if dim:
+        source_bright_color = COLOR_DIM
+        source_named_color = COLOR_DIM
+        dest_color = COLOR_DIM
+        excluded_color = COLOR_DIM
+
     if ":" not in volume:
         source = volume
         if container_name and source.startswith(f"{container_name}."):
             source = source[len(container_name) + 1 :]
-        return f"⛔ -> {COLOR_RED}{prettify_placeholder_path(source, project_path)}{COLOR_RESET}"
+        return f"⛔ {COLOR_RESET}-> {excluded_color}{prettify_placeholder_path(source, project_path)}{COLOR_RESET}"
 
     parts = volume.split(":", 1)
     source = parts[0]
@@ -345,15 +361,15 @@ def format_volume_display(
     if container_name and source.startswith(f"{container_name}."):
         source = source[len(container_name) + 1 :]
     source_display = prettify_placeholder_path(source, project_path)
-    dest_color = COLOR_PINK
+
     if (
         source_display.startswith("/")
         or source_display.startswith(".")
         or source_display.startswith("~")
     ):
-        source_color = COLOR_YELLOW
+        source_color = source_bright_color
     else:
-        source_color = COLOR_CYAN
+        source_color = source_named_color
     return f"{source_color}{source_display}{COLOR_RESET} -> {dest_color}{dest}{COLOR_RESET}"
 
 
@@ -673,7 +689,7 @@ def list_containers(config_file: str) -> None:
             # Show excluded count if there are any excluded volumes
             if excluded_count > 0:
                 config_lines.append(
-                    f"⛔ -> {COLOR_RED}{excluded_count} excluded paths{COLOR_RESET}"
+                    f"⛔ {COLOR_RED}excluded paths: {excluded_count}{COLOR_RESET}"
                 )
 
         if cfg.get("startup_cmd"):
@@ -950,6 +966,418 @@ def remove_all_configs(config_file: str) -> None:
         print(f"{COLOR_YELLOW}⚠ No config file found{COLOR_RESET}")
 
 
+def normalize_port(port: str) -> str:
+    """Normalize port mapping to 'host:container' format."""
+    if not port:
+        return ""
+    port = port.strip()
+    if ":" in port:
+        return port
+    return f"{port}:{port}"
+
+
+def normalize_ports_list(ports: str | list[str] | None) -> str:
+    """Normalize ports to sorted space-separated string."""
+    if not ports:
+        return ""
+    if isinstance(ports, str):
+        ports_list = [p.strip() for p in ports.split() if p.strip()]
+    else:
+        ports_list = [str(p).strip() for p in ports if p]
+    normalized = sorted(set(normalize_port(p) for p in ports_list if p))
+    return " ".join(normalized)
+
+
+def normalize_volumes_list(volumes: str | list[str] | None) -> str:
+    """Normalize volumes to sorted ||| separated string."""
+    if not volumes:
+        return ""
+    if isinstance(volumes, str):
+        if "|||" in volumes:
+            volumes_list = [v.strip() for v in volumes.split("|||") if v.strip()]
+        else:
+            volumes_list = [volumes.strip()] if volumes.strip() else []
+    else:
+        volumes_list = [str(v).strip() for v in volumes if v]
+
+    # Filter out docker socket
+    volumes_list = [
+        v
+        for v in volumes_list
+        if v
+        and v != "/var/run/docker.sock:/var/run/docker.sock"
+        and "docker.sock" not in v
+    ]
+
+    # Sort: mount volumes first (with :), then excluded volumes (without :)
+    mount_volumes = sorted(v for v in volumes_list if ":" in v)
+    excluded_volumes = sorted(v for v in volumes_list if ":" not in v)
+
+    all_volumes = mount_volumes + excluded_volumes
+    return "|||".join(all_volumes) if all_volumes else ""
+
+
+def normalize_volumes(
+    volumes: str,
+    container_name: str,
+    project_path: str,
+) -> None:
+    """
+    Normalize volumes for comparison by expanding paths and normalizing names.
+    This replicates bash _normalize_volume_name and _collapse_volume logic.
+    Prints the normalized volume string.
+    """
+    if not volumes:
+        print("")
+        return
+
+    volume_list = [v.strip() for v in volumes.split("|||") if v.strip()]
+    normalized_list = []
+
+    for vol in volume_list:
+        if not vol or vol == "/var/run/docker.sock:/var/run/docker.sock":
+            continue
+
+        # Expand __PROJECT_PATH__ and __HOME__ placeholders
+        expanded_vol = vol
+        if "__PROJECT_PATH__" in vol and project_path:
+            expanded_vol = vol.replace("__PROJECT_PATH__", project_path)
+        if "__HOME__" in vol:
+            home = os.path.expanduser("~")
+            expanded_vol = expanded_vol.replace("__HOME__", home)
+
+        # Handle relative paths (./something)
+        if ":" in expanded_vol:
+            source, dest = expanded_vol.split(":", 1)
+            if source.startswith("./"):
+                if project_path:
+                    source = project_path + source[1:]
+                else:
+                    source = os.getcwd() + source[1:]
+            expanded_vol = f"{source}:{dest}"
+
+        # Normalize volume names (add container prefix for named volumes)
+        if ":" in expanded_vol:
+            source, dest = expanded_vol.split(":", 1)
+            # If source is not an absolute path and not relative, it's a named volume
+            if not source.startswith("/") and not source.startswith("."):
+                # Add container prefix if not already present
+                if not source.startswith(f"{container_name}."):
+                    source = f"{container_name}.{source}"
+            expanded_vol = f"{source}:{dest}"
+        else:
+            # Excluded volume (no destination)
+            if not expanded_vol.startswith("/") and not expanded_vol.startswith("."):
+                if not expanded_vol.startswith(f"{container_name}."):
+                    expanded_vol = f"{container_name}.{expanded_vol}"
+
+        # Collapse back to placeholders for storage
+        collapsed_vol = expanded_vol
+        if project_path and collapsed_vol.startswith(project_path):
+            collapsed_vol = collapsed_vol.replace(project_path, "__PROJECT_PATH__", 1)
+
+        home = os.path.expanduser("~")
+        if collapsed_vol.startswith(home):
+            collapsed_vol = collapsed_vol.replace(home, "__HOME__", 1)
+
+        normalized_list.append(collapsed_vol)
+
+    # Sort: mount volumes first, then excluded volumes
+    mount_volumes = sorted(v for v in normalized_list if ":" in v)
+    excluded_volumes = sorted(v for v in normalized_list if ":" not in v)
+
+    all_volumes = mount_volumes + excluded_volumes
+    print("|||".join(all_volumes) if all_volumes else "")
+
+
+def compare_configs(
+    config_file: str,
+    container_name: str,
+    new_ports: str = "",
+    new_image: str = "",
+    new_docker_cmd: str = "",
+    new_project_path: str = "",
+    new_socket: str = "",
+    new_volumes: str = "",
+) -> None:
+    """
+    Compare saved config with new config and output differences.
+    Prints JSON with 'differs' boolean, 'changes' array, and 'old_values' dict.
+    """
+    result: dict[str, Any] = {"differs": False, "changes": [], "old_values": {}}
+
+    try:
+        with open(config_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        saved_config = data.get(container_name, {})
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        # No saved config means it differs
+        result["differs"] = True
+        print(json.dumps(result))
+        return
+
+    if not saved_config:
+        result["differs"] = True
+        print(json.dumps(result))
+        return
+
+    # Get saved values
+    saved_ports = saved_config.get("ports", "")
+    saved_image = saved_config.get("image", "")
+    saved_docker_cmd = saved_config.get("docker_cmd", "")
+    saved_project_path = saved_config.get("project_path", "")
+    saved_socket_raw = saved_config.get("socket")
+    saved_volumes = saved_config.get("volumes", "")
+
+    # Normalize socket values for comparison
+    def normalize_socket(val: Any) -> str:
+        if val is None:
+            return ""
+        if isinstance(val, bool):
+            return "true" if val else "false"
+        val_str = str(val).strip().lower()
+        if val_str in ("true", "1", "yes"):
+            return "true"
+        if val_str in ("false", "0", "no"):
+            return "false"
+        return ""
+
+    saved_socket = normalize_socket(saved_socket_raw)
+    new_socket_norm = normalize_socket(new_socket)
+
+    # Normalize and compare ports
+    saved_ports_norm = normalize_ports_list(saved_ports)
+    new_ports_norm = normalize_ports_list(new_ports)
+    if saved_ports_norm != new_ports_norm:
+        result["changes"].append("ports")
+        result["old_values"]["ports"] = saved_ports_norm
+
+    # Compare image
+    if saved_image != new_image:
+        result["changes"].append("image")
+        result["old_values"]["image"] = saved_image
+
+    # Compare docker_cmd
+    if saved_docker_cmd != new_docker_cmd:
+        result["changes"].append("docker")
+        result["old_values"]["docker"] = saved_docker_cmd
+
+    # Compare project_path
+    if saved_project_path != new_project_path:
+        result["changes"].append("project")
+        result["old_values"]["project"] = saved_project_path
+
+    # Compare socket
+    if saved_socket != new_socket_norm:
+        result["changes"].append("socket")
+        result["old_values"]["socket"] = saved_socket
+
+    # Normalize and compare volumes
+    # Both should already be in collapsed form, but ensure consistent sorting
+    saved_volumes_norm = normalize_volumes_list(saved_volumes)
+    new_volumes_norm = normalize_volumes_list(new_volumes)
+
+    # Debug: ensure both are truly normalized the same way
+    if saved_volumes_norm != new_volumes_norm:
+        result["changes"].append("volumes")
+        result["old_values"]["volumes"] = saved_volumes_norm
+
+    result["differs"] = len(result["changes"]) > 0
+    print(json.dumps(result))
+
+
+def _normalize_port_set(ports: str | list[str] | None) -> set[str]:
+    if not ports:
+        return set()
+    if isinstance(ports, str):
+        port_items = [p.strip() for p in ports.split() if p.strip()]
+    else:
+        port_items = [str(p).strip() for p in ports if p]
+    normalized = {normalize_port(p) for p in port_items if p}
+    return normalized
+
+
+def _render_port_line(port: str, prefix: str, color: str) -> str:
+    host, container = port.split(":", 1)
+    prefix_text = f"{color}{prefix}{COLOR_RESET} " if prefix else ""
+    line_color = color if prefix else COLOR_DIM
+    arrow_color = COLOR_DIM if line_color == COLOR_DIM else line_color
+    return (
+        f"{prefix_text}{line_color}🔀 {host}{COLOR_RESET}"
+        f" {arrow_color}→ {line_color}{container}{COLOR_RESET}"
+    )
+
+
+def _split_volumes(volumes_str: str) -> list[str]:
+    if not volumes_str:
+        return []
+    return [v.strip() for v in volumes_str.split("|||") if v.strip()]
+
+
+def format_config_display(
+    ports: str = "",
+    image: str = "",
+    docker_cmd: str = "",
+    project_path: str = "",
+    socket_state: str = "",
+    volumes: str = "",
+    changes: str = "",
+    old_values_json: str = "",
+    container_name: str | None = None,
+) -> None:
+    """
+    Format and display configuration at container launch.
+    Changes is a comma-separated list of changed fields.
+    old_values_json is a JSON string with old values for changed fields.
+    """
+    changed_fields = set(changes.split(",")) if changes else set()
+    old_values = {}
+    if old_values_json:
+        try:
+            old_values = json.loads(old_values_json)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    lines = []
+
+    # Docker command and socket
+    docker_display = (
+        docker_cmd if docker_cmd else os.environ.get("FDEVC_DOCKER", "docker")
+    )
+    socket_display = format_socket_display(socket_state)
+
+    if "docker" in changed_fields or "socket" in changed_fields:
+        # Show diff for docker or socket
+        if "docker" in changed_fields:
+            old_docker = old_values.get("docker", "")
+            lines.append(f"{COLOR_RED}- 💻 {old_docker}{COLOR_RESET}")
+            lines.append(
+                f"{COLOR_GREEN}+ 💻 {docker_display}{COLOR_RESET} {socket_display}"
+            )
+        elif "socket" in changed_fields:
+            old_socket = old_values.get("socket", "")
+            old_socket_display = format_socket_display(old_socket)
+            lines.append(
+                f"{COLOR_RED}- 💻 {docker_display}{COLOR_RESET} {old_socket_display}"
+            )
+            lines.append(
+                f"{COLOR_GREEN}+ 💻 {docker_display}{COLOR_RESET} {socket_display}"
+            )
+    else:
+        line = f"{COLOR_DIM}💻 {docker_display} {socket_display}{COLOR_RESET}"
+        lines.append(line)
+
+    # Image
+    if image:
+        image_line = format_image_display(image, project_path)
+        if "image" in changed_fields:
+            old_image = old_values.get("image", "")
+            old_image_line = format_image_display(old_image, project_path)
+            lines.append(f"{COLOR_RED}- {old_image_line}{COLOR_RESET}")
+            lines.append(f"{COLOR_GREEN}+ {image_line}{COLOR_RESET}")
+        else:
+            # Make non-diff image line dim
+            lines.append(f"{COLOR_DIM}{image_line}{COLOR_RESET}")
+
+    # Project path
+    if project_path or "project" in changed_fields:
+        display_path = prettify_placeholder_path(project_path) if project_path else ""
+        if "project" in changed_fields:
+            old_project = old_values.get("project", "")
+            old_display_path = (
+                prettify_placeholder_path(old_project) if old_project else "(none)"
+            )
+            new_display_path = display_path if display_path else "(none)"
+            lines.append(f"{COLOR_RED}- 📁 {old_display_path}{COLOR_RESET}")
+            lines.append(f"{COLOR_GREEN}+ 📁 {new_display_path}{COLOR_RESET}")
+        elif project_path:
+            lines.append(f"{COLOR_DIM}📁 {display_path}{COLOR_RESET}")
+
+    # Ports
+    if ports or "ports" in changed_fields:
+        new_ports_set = _normalize_port_set(ports)
+        if "ports" in changed_fields:
+            old_ports_set = _normalize_port_set(old_values.get("ports", ""))
+            removed_ports = sorted(old_ports_set - new_ports_set)
+            added_ports = sorted(new_ports_set - old_ports_set)
+            unchanged_ports = sorted(old_ports_set & new_ports_set)
+
+            if removed_ports:
+                for port in removed_ports:
+                    lines.append(_render_port_line(port, "-", COLOR_RED))
+            else:
+                lines.append(f"{COLOR_RED}- 🔀 (none){COLOR_RESET}")
+
+            if added_ports:
+                for port in added_ports:
+                    lines.append(_render_port_line(port, "+", COLOR_GREEN))
+            else:
+                lines.append(f"{COLOR_GREEN}+ 🔀 (none){COLOR_RESET}")
+
+            if unchanged_ports:
+                for port in unchanged_ports:
+                    lines.append(_render_port_line(port, "", COLOR_DIM))
+        elif new_ports_set:
+            for port in sorted(new_ports_set):
+                lines.append(_render_port_line(port, "", COLOR_DIM))
+
+    # Volumes
+    if volumes or "volumes" in changed_fields:
+        if "volumes" in changed_fields:
+            old_volumes_str = old_values.get("volumes", "")
+            old_volume_set = set(_split_volumes(old_volumes_str))
+            new_volume_set = set(_split_volumes(normalize_volumes_list(volumes)))
+
+            removed_vols = sorted(old_volume_set - new_volume_set)
+            added_vols = sorted(new_volume_set - old_volume_set)
+            unchanged_vols = sorted(old_volume_set & new_volume_set)
+
+            if removed_vols:
+                for vol in removed_vols:
+                    if vol and "docker.sock" not in vol:
+                        formatted = format_volume_display(
+                            vol, project_path, container_name
+                        )
+                        if formatted:
+                            lines.append(f"{COLOR_RED}- 💾 {formatted}{COLOR_RESET}")
+            else:
+                lines.append(f"{COLOR_RED}- 💾 (none){COLOR_RESET}")
+
+            if added_vols:
+                for vol in added_vols:
+                    if vol and "docker.sock" not in vol:
+                        formatted = format_volume_display(
+                            vol, project_path, container_name
+                        )
+                        if formatted:
+                            lines.append(f"{COLOR_GREEN}+ 💾 {formatted}{COLOR_RESET}")
+            else:
+                lines.append(f"{COLOR_GREEN}+ 💾 (none){COLOR_RESET}")
+
+            if unchanged_vols:
+                for vol in unchanged_vols:
+                    if vol and "docker.sock" not in vol:
+                        formatted = format_volume_display(
+                            vol, project_path, container_name, dim=True
+                        )
+                        if formatted:
+                            lines.append(f"💾 {formatted}")
+        elif volumes:
+            volume_list = _split_volumes(normalize_volumes_list(volumes))
+
+            for vol in volume_list:
+                if vol and "docker.sock" not in vol:
+                    formatted = format_volume_display(
+                        vol, project_path, container_name, dim=True
+                    )
+                    if formatted:
+                        lines.append(f"💾 {formatted}")
+
+    # Print all lines
+    for line in lines:
+        print(line, file=sys.stderr)
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: utils.py <command> [args...]", file=sys.stderr)
@@ -989,6 +1417,34 @@ if __name__ == "__main__":
         list_configs(sys.argv[2])
     elif command == "remove_all_configs":
         remove_all_configs(sys.argv[2])
+    elif command == "compare_configs":
+        compare_configs(
+            sys.argv[2],
+            sys.argv[3],
+            sys.argv[4] if len(sys.argv) > 4 else "",
+            sys.argv[5] if len(sys.argv) > 5 else "",
+            sys.argv[6] if len(sys.argv) > 6 else "",
+            sys.argv[7] if len(sys.argv) > 7 else "",
+            sys.argv[8] if len(sys.argv) > 8 else "",
+            sys.argv[9] if len(sys.argv) > 9 else "",
+        )
+    elif command == "format_config_display":
+        format_config_display(
+            sys.argv[2] if len(sys.argv) > 2 else "",
+            sys.argv[3] if len(sys.argv) > 3 else "",
+            sys.argv[4] if len(sys.argv) > 4 else "",
+            sys.argv[5] if len(sys.argv) > 5 else "",
+            sys.argv[6] if len(sys.argv) > 6 else "",
+            sys.argv[7] if len(sys.argv) > 7 else "",
+            sys.argv[8] if len(sys.argv) > 8 else "",
+            sys.argv[9] if len(sys.argv) > 9 else "",
+        )
+    elif command == "normalize_volumes":
+        normalize_volumes(
+            sys.argv[2] if len(sys.argv) > 2 else "",
+            sys.argv[3] if len(sys.argv) > 3 else "",
+            sys.argv[4] if len(sys.argv) > 4 else "",
+        )
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         sys.exit(1)
