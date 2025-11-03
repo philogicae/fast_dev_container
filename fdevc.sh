@@ -793,7 +793,10 @@ _fdevc_start() {
     custom_basename=""
     local volumes_override=()
     local has_tty=true
+    # Check if we actually have a TTY available
     [[ ! -t 0 || ! -t 1 ]] && has_tty=false
+    # Only force non-interactive mode if explicitly requested via environment variable
+    [[ "${FDEVC_FORCE_NONINTERACTIVE:-}" == "true" ]] && has_tty=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
