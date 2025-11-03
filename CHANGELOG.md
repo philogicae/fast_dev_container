@@ -1,44 +1,4 @@
-## [unreleased]
-
-### 🚀 Features
-
-- Simplify project structure visualization in README
-
-### 📚 Documentation
-
-- Update changelog for version 1.0.3
-## [1.0.3] - 2025-11-01
-
-### 🚀 Features
-
-- Enhance container management and configuration display
-
-### 📚 Documentation
-
-- Update changelog for version 1.0.2
-## [1.0.2] - 2025-10-31
-
-### 🚀 Features
-
-- Improve container configuration handling and table display
-
-### ⚙️ Miscellaneous Tasks
-
-- Release version 1.0.1
-## [1.0.1] - 2025-10-30
-
-### 🚀 Features
-
-- Enhance volume display and sorting in container listings
-
-### 🐛 Bug Fixes
-
-- Improve container status checks and variable initialization
-
-### 📚 Documentation
-
-- Update changelog with volume and container improvements
-## [1.0.0] - 2025-10-30
+## [1.0.0] - 2025-11-03
 
 ### 🚀 Features
 
@@ -61,6 +21,11 @@
 - Improve CLI documentation and container configuration
 - Improve multi-arch Docker build and deployment
 - Enhance project templates and Docker configuration
+- Enhance volume display and sorting in container listings
+- Improve container configuration handling and table display
+- Enhance container management and configuration display
+- Simplify project structure visualization in README
+- Improve script robustness and configuration handling
 
 ### 🐛 Bug Fixes
 
@@ -68,6 +33,7 @@
 - Improve argument handling in container start script
 - Improve GitHub Actions cache handling and permissions
 - Update Docker installation in Dockerfile
+- Improve container status checks and variable initialization
 
 ### 🚜 Refactor
 
@@ -86,8 +52,13 @@
 - Update changelog with Docker and CI improvements
 - Update changelog with latest CI/CD and Docker improvements
 - Update changelog with latest CI/CD and Docker enhancements
+- Update changelog with volume and container improvements
+- Update changelog for version 1.0.2
+- Update changelog for version 1.0.3
+- Update documentation and changelog for v1.0.3
 
 ### ⚙️ Miscellaneous Tasks
 
 - Update gitignore to exclude additional cache directories
 - Update changelog with recent Docker and CI improvements
+- Release version 1.0.1
