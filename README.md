@@ -15,11 +15,13 @@ Create and manage vm-like dev containers for any directory in seconds.
 ## Installation
 
 **Quick Install (Recommended):**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/philogicae/fast_dev_container/main/install | bash
 ```
 
 **Manual Install:**
+
 ```bash
 git clone https://github.com/philogicae/fast_dev_container.git ~/.fdevc
 echo 'source ~/.fdevc/fdevc.sh' >> ~/.bashrc  # or ~/.zshrc
@@ -43,6 +45,7 @@ fdevc -h, --help              # Show detailed help message
 ```
 
 **Common options:**
+
 - `-i IMAGE|DOCKERFILE` - Custom image or Dockerfile path
 - `-p "8080 3000:3001"` - Port mappings (space-separated)
 - `-v "/data:/data"` - Volume mounts (can be repeated)
@@ -81,6 +84,7 @@ Settings are automatically saved to `~/.fdevc/.fdevc_config.json`.
 If `fdevc.Dockerfile` exists in current directory, it will be used by default instead of the global template. Use `fdevc custom` to create one.
 
 **Environment Variables:**
+
 ```bash
 export FDEVC_PYTHON="python3"         # Python interpreter (default: python3)
 export FDEVC_DOCKER="podman"          # Container runtime (default: docker)
@@ -94,6 +98,7 @@ export FDEVC_IMAGE="debian:13-slim"   # Default image or Dockerfile path
 - Use `--no-dir` for portable containers that don't depend on a project directory
 - Copy configs with `--cp` to quickly spin up similar environments
 - Use `fdevc gen` to create shareable runnable projects others can install with curl
+- Runnable project example: [enclave-template](https://github.com/philogicae/enclave-template)
 
 ## Changelog
 
