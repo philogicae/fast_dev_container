@@ -1,3 +1,13 @@
+## [1.0.1] - 2025-11-07
+
+### 🚜 Refactor
+
+- Simplify conditional logic and improve volume name handling
+
+### 📚 Documentation
+
+- Consolidate changelog into single v1.0.0 release
+- Add example project link
 ## [1.0.0] - 2025-11-03
 
 ### 🚀 Features
