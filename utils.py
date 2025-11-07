@@ -1059,17 +1059,24 @@ def normalize_volumes(
         # Normalize volume names (add container prefix for named volumes)
         if ":" in expanded_vol:
             source, dest = expanded_vol.split(":", 1)
-            # If source is not an absolute path and not relative, it's a named volume
-            if not source.startswith("/") and not source.startswith("."):
-                # Add container prefix if not already present
-                if not source.startswith(f"{container_name}."):
-                    source = f"{container_name}.{source}"
+            # Only add container prefix if it's a named volume (not absolute/relative path and no placeholders)
+            if (
+                not source.startswith("/")
+                and not source.startswith(".")
+                and "__" not in source
+                and not source.startswith(f"{container_name}.")
+            ):
+                source = f"{container_name}.{source}"
             expanded_vol = f"{source}:{dest}"
         else:
             # Excluded volume (no destination)
-            if not expanded_vol.startswith("/") and not expanded_vol.startswith("."):
-                if not expanded_vol.startswith(f"{container_name}."):
-                    expanded_vol = f"{container_name}.{expanded_vol}"
+            if (
+                not expanded_vol.startswith("/")
+                and not expanded_vol.startswith(".")
+                and "__" not in expanded_vol
+                and not expanded_vol.startswith(f"{container_name}.")
+            ):
+                expanded_vol = f"{container_name}.{expanded_vol}"
 
         # Collapse back to placeholders for storage
         collapsed_vol = expanded_vol

@@ -648,17 +648,13 @@ _expand_volume() {
     local vol_target="${volume#*:}"
     local expanded_source
     expanded_source=$(_expand_path "${vol_source}" "${project_path}")
-    if [[ "${expanded_source}" == ./* ]]; then
-        if [[ -n "${project_path}" && "${project_path}" != "__NO_PROJECT__" ]]; then
-            expanded_source="${project_path}${expanded_source#.}"
-        else
-            expanded_source="${PWD}${expanded_source#.}"
-        fi
-    fi
+    
+    [[ "${expanded_source}" == ./* ]] && {
+        [[ -n "${project_path}" && "${project_path}" != "__NO_PROJECT__" ]] && expanded_source="${project_path}${expanded_source#.}" || expanded_source="${PWD}${expanded_source#.}"
+    }
+    
     if [[ "${volume}" == *:* ]]; then
-        if [[ "${vol_target}" == ./* ]]; then
-            vol_target="/workspace${vol_target#.}"
-        fi
+        [[ "${vol_target}" == ./* ]] && vol_target="/workspace${vol_target#.}"
         echo "${expanded_source}:${vol_target}"
     else
         echo "${expanded_source}"
@@ -671,21 +667,15 @@ _normalize_volume_name() {
     
     local expanded_vol
     expanded_vol=$(_expand_volume "${volume}" "${project_path}")
-    
     local vol_source="${expanded_vol%%:*}"
     local vol_target="${expanded_vol#*:}"
-    if [[ "${vol_source}" != /* && "${vol_source}" != ./* && "${expanded_vol}" == *:* ]]; then
-        # Check if already has container prefix (from config)
-        if [[ "${vol_source}" != "${container_name}."* ]]; then
-            vol_source="${container_name}.${vol_source}"
-        fi
+    
+    # Only add container prefix if it's a named volume (not absolute/relative path and no placeholders)
+    if [[ "${vol_source}" != /* && "${vol_source}" != ./* && "${vol_source}" != *__*__* && "${expanded_vol}" == *:* && "${vol_source}" != "${container_name}."* ]]; then
+        vol_source="${container_name}.${vol_source}"
     fi
     
-    if [[ "${expanded_vol}" == *:* ]]; then
-        echo "${vol_source}:${vol_target}"
-    else
-        echo "${vol_source}"
-    fi
+    [[ "${expanded_vol}" == *:* ]] && echo "${vol_source}:${vol_target}" || echo "${vol_source}"
 }
 
 _merge_config() {
@@ -700,28 +690,28 @@ _merge_config() {
     local image="${image_override:-$(_get_config_value "${config}" "image" "${default_image}")}" 
     local docker_cmd="${docker_cmd_override:-$(_get_config_value "${config}" "docker_cmd" "${FDEVC_DOCKER}")}" 
     local project_from_config
-    project_from_config="$(_get_config_value "${config}" "project_path" "")"
+    project_from_config=$(_get_config_value "${config}" "project_path" "")
     local project_path
     if [[ -n "${project_override}" ]]; then
         project_path="${project_override}"
     elif [[ -n "${project_from_config}" ]]; then
-        project_path="${project_from_config}"
+        project_path=$(_expand_path "${project_from_config}" "")
     elif [[ "${config_present}" == "false" ]]; then
         project_path="$PWD"
     else
         project_path=""
     fi
     local socket_from_config
-    socket_from_config="$(_get_config_value "${config}" "socket" "__DEVCONF_NO_SOCKET__")"
+    socket_from_config=$(_get_config_value "${config}" "socket" "__DEVCONF_NO_SOCKET__")
     local socket_value
     socket_value=$(_resolve_socket_value "${socket_override}" "${socket_from_config}")
     local volumes_from_config
-    volumes_from_config="$(_get_config_value "${config}" "volumes" "")"
+    volumes_from_config=$(_get_config_value "${config}" "volumes" "")
     local volumes="${volumes_override:-${volumes_from_config}}"
     local startup_cmd
-    startup_cmd="$(_get_config_value "${config}" "startup_cmd" "")"
+    startup_cmd=$(_get_config_value "${config}" "startup_cmd" "")
     local persist_mode_raw
-    persist_mode_raw="$(_get_config_value "${config}" "persist" "false")"
+    persist_mode_raw=$(_get_config_value "${config}" "persist" "false")
     local persist_mode_value
     persist_mode_value=$(_normalize_persist_value "${persist_mode_raw}")
     [[ -f "${image}" ]] && image="$(_absolute_path "${image}")"
@@ -1032,36 +1022,28 @@ _fdevc_start() {
 
     # Check if container exists (skip for force_new)
     local container_exists=false
-    if [[ "${force_new}" != true ]] && _container_exists "${container_name}" "${docker_cmd}"; then
-        container_exists=true
-    fi
-
-    if [[ "${container_exists}" == true ]]; then
-        if _container_running "${container_name}" "${docker_cmd}"; then
-            container_running=true
-            container_was_running=true
-        fi
+    [[ "${force_new}" != true ]] && _container_exists "${container_name}" "${docker_cmd}" && container_exists=true
+    
+    if [[ "${container_exists}" == true ]] && _container_running "${container_name}" "${docker_cmd}"; then
+        container_running=true
+        container_was_running=true
     fi
 
     local desired_socket_to_save
     desired_socket_to_save=$(_prepare_save_config_args "${no_socket}" "${socket_config}")
-    local desired_project_to_save="${project_path}"
-    if [[ "${no_dir}" == true ]]; then
-        desired_project_to_save=""
-    fi
+    local desired_project_to_save=""
+    [[ -n "${project_path}" && "${no_dir}" != true ]] && desired_project_to_save=$(_collapse_path "${project_path}" "")
+    
     local volumes_to_save="${volumes_config}"
-    if [[ ${#volumes_override[@]} -gt 0 ]]; then
-        volumes_to_save="${volumes_override_str}"
-    fi
+    [[ ${#volumes_override[@]} -gt 0 ]] && volumes_to_save="${volumes_override_str}"
+    
     if [[ "${no_v_dir}" != true && -n "${desired_project_to_save}" ]]; then
         local has_project_vol=false
-        if [[ -n "${volumes_to_save}" ]]; then
-            echo "${volumes_to_save}" | grep -q "__PROJECT_PATH__" && has_project_vol=true
-        fi
-        if [[ "${has_project_vol}" == false ]]; then
+        [[ -n "${volumes_to_save}" ]] && echo "${volumes_to_save}" | grep -q "__PROJECT_PATH__" && has_project_vol=true
+        [[ "${has_project_vol}" == false ]] && {
             [[ -n "${volumes_to_save}" ]] && volumes_to_save="${volumes_to_save}|||"
             volumes_to_save="${volumes_to_save}__PROJECT_PATH__:/workspace"
-        fi
+        }
     fi
     local normalized_volumes_display
     normalized_volumes_display=$(_normalize_volumes_for_comparison "${volumes_to_save}" "${container_name}" "${project_path}")
