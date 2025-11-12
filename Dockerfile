@@ -15,7 +15,8 @@ FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim
 ARG TARGETARCH
 
 # Tool installation flags - EDIT THESE to enable/disable tools
-ENV NODE_INSTALL="true" \
+ENV HOMEBREW_INSTALL="true" \
+    NODE_INSTALL="true" \
     DENO_INSTALL="true" \
     GO_INSTALL="true" \
     RUST_INSTALL="true"
@@ -104,6 +105,7 @@ RUN apt-get update \
     rsync \
     # JSON/YAML tools
     jq \
+    yq \
     # SSH client
     openssh-client \
     # Docker packages
@@ -115,6 +117,15 @@ RUN apt-get update \
     # 5. Cleanup
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Install Homebrew (conditional)
+RUN if [ "${HOMEBREW_INSTALL}" != "false" ]; then \
+    touch /.dockerenv \
+    && bash -c "$(NONINTERACTIVE=1 curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+    && echo >> /root/.bashrc \
+    && echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /root/.bashrc \
+    && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; \
+    fi
 
 # Install "stable" Python dev tools using UV
 RUN uv pip install --system --no-cache \
