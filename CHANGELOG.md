@@ -1,3 +1,12 @@
+## [1.0.2] - 2025-11-12
+
+### 🚀 Features
+
+- Add Homebrew package manager support
+
+### ⚙️ Miscellaneous Tasks
+
+- Release version 1.0.1 with refactoring and documentation updates
 ## [1.0.1] - 2025-11-07
 
 ### 🚜 Refactor
